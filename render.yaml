@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: ff-likes-api
+    env: python
+    buildCommand: pip install -r api/requirements.txt
+    startCommand: cd api && python app.py
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  - type: worker
+    name: ff-likes-bot
+    env: python
+    buildCommand: pip install -r bot/requirements.txt
+    startCommand: cd bot && python app.py
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
