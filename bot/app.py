@@ -90,7 +90,8 @@ def update_user_like(uid):
 
 async def call_like_api(region, uid):
     try:
-        url = f"{API_URL}like?uid={uid}&region={region}&key={API_KEY}"
+        base = API_URL.rstrip("/") + "/"
+        url = f"{base}like?uid={uid}&region={region}&key={API_KEY}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status == 200:

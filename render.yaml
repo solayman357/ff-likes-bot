@@ -1,18 +1,28 @@
 services:
-  - type: web
+  - type: web_service
     name: ff-likes-api
-    env: python
-    buildCommand: pip install -r api/requirements.txt
-    startCommand: cd api && python app.py
+    runtime: python
+    rootDirectory: api
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
-
   - type: worker
     name: ff-likes-bot
-    env: python
-    buildCommand: pip install -r bot/requirements.txt
-    startCommand: cd bot && python app.py
+    runtime: python
+    rootDirectory: bot
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: BOT_TOKEN
+        fromGroup: BOT_TOKEN
+      - key: ADMIN_IDS
+        fromGroup: BOT_ADMIN_IDS
+      - key: API_URL
+        fromService:
+          name: ff-likes-api
+          type: web_service
+          property: url
