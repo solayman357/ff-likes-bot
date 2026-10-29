@@ -1,0 +1,25 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy API to Render
+        run: |
+          curl -X POST ${{ secrets.RENDER_API_URL }} \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json"
+
+  deploy-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy Bot to Render
+        run: |
+          curl -X POST ${{ secrets.RENDER_BOT_URL }} \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json"
