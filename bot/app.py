@@ -2,7 +2,6 @@ import os
 import json
 import base64
 import sys
-import binascii
 import requests
 import aiohttp
 import asyncio
@@ -10,11 +9,8 @@ from datetime import datetime, date, time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from telegram.request import HTTPXRequest
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
 
-# Allow importing protobuf definitions from the api directory
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'api'))
+# Protobuf imports (local copies for Render deployment)
 import uid_generator_pb2  # noqa: E402
 
 # ============ CONFIGURATION ============
@@ -37,7 +33,7 @@ DATA_FILES = {
     'config': 'bot_config.json'
 }
 
-API_TOKEN_FILE = '/root/OWN-LIKE-BOT/api/token_bd.json'
+# Token upload: bot forwards tokens to API's /upload-tokens endpoint
 
 # ============ GLOBALS ============
 bot_status = "on"
@@ -328,47 +324,25 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await reply(update, f"❌ *Invalid JSON file:* `{str(e)[:100]}`")
             return
 
-        working = []
-        failed = []
+        # Forward tokens to API's /upload-tokens endpoint
+        upload_url = f"{API_URL.rstrip('/')}/upload-tokens"
+        payload = {"tokens": new_tokens}
 
-        for item in new_tokens:
-            token = item.get('token') if isinstance(item, dict) else item
-            if not token:
-                continue
-            
-            try:
-                message = uid_generator_pb2.uid_generator()
-                message.saturn_ = int('5933029554')
-                message.garena = 1
-                protobuf_data = message.SerializeToString()
-                cipher = AES.new(MAIN_KEY, AES.MODE_CBC, MAIN_IV)
-                padded = pad(protobuf_data, AES.block_size)
-                encrypted = cipher.encrypt(padded)
-                edata_hex = binascii.hexlify(encrypted).decode('utf-8')
-                
-                headers = {
-                    'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)',
-                    'Authorization': f'Bearer {token}',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Expect': '100-continue',
-                    'X-Unity-Version': '2018.4.11f1',
-                    'X-GA': 'v1 1',
-                    'ReleaseVersion': 'OB55'
-                }
-                
-                r = requests.post('https://clientbp.ggpolarbear.com/GetPlayerPersonalShow', 
-                                 data=bytes.fromhex(edata_hex), headers=headers, verify=False, timeout=10)
-                if r.status_code == 200:
-                    working.append(token)
-                else:
-                    failed.append(token)
-            except Exception as e:
-                failed.append(token)
+        async with aiohttp.ClientSession() as session:
+            async with session.post(upload_url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                result = await resp.json()
 
-        with open(API_TOKEN_FILE, 'w') as f:
-            json.dump([{'token': t} for t in working], f, indent=2)
+        if resp.status == 200:
+            await reply(update,
+                f"✅ *Token Update Complete*\n\n"
+                f"✅ Added: {result.get('added', 0)}\n"
+                f"❌ Expired: {result.get('expired', 0)}\n"
+                f"📁 Total in bank: {result.get('total_in_bank', 0)}"
+            )
+        else:
+            error_msg = result.get("error", "Unknown error") if isinstance(result, dict) else str(result)
+            await reply(update, f"❌ *API Error:* `{error_msg}`")
 
-        await reply(update, f"✅ *Token Update Complete*\n\n✅ Working: {len(working)}\n❌ Expired: {len(failed)}\n📁 Total saved: {len(working)}")
     except Exception as e:
         await reply(update, f"❌ *Error processing file:* `{str(e)[:100]}`")
 

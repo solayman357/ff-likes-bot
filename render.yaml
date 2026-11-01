@@ -8,6 +8,10 @@ services:
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: API_KEY
+        sync: false
+    healthCheckPath: /health
+
   - type: worker
     name: ff-likes-bot
     runtime: python
@@ -18,9 +22,11 @@ services:
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: BOT_TOKEN
-        fromGroup: BOT_TOKEN
+        sync: false
       - key: ADMIN_IDS
-        fromGroup: BOT_ADMIN_IDS
+        sync: false
+      - key: ENCODED_KEY
+        sync: false
       - key: API_URL
         fromService:
           name: ff-likes-api

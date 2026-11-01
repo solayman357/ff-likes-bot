@@ -21,10 +21,9 @@ app = Flask(__name__)
 # Base directory for resolving data files regardless of working directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ✅ Valid API keys
-VALID_API_KEYS = {
-    "ZEXXY"  # don't change warna api or bot dono nhi chalega 
-}
+# ✅ Valid API keys (loaded from environment variable)
+API_KEY_ENV = os.getenv("API_KEY", "ZEXXY")
+VALID_API_KEYS = {API_KEY_ENV}
 
 # 🔢 Like limit tracking
 daily_limit = 200
@@ -318,6 +317,12 @@ def handle_requests():
         return {"error": str(e)}, 500
 
 
+# 🆕 Health check endpoint
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "ok", "service": "ff-likes-api"})
+
+
 # 🆕 /remain endpoint
 @app.route('/remain', methods=['GET'])
 def remain_info():
@@ -331,6 +336,84 @@ def remain_info():
         "reset_info": "4:00 AM IST"
     }
     return jsonify(data)
+
+
+# 🆕 Upload tokens endpoint (for bot to send tokens to API on Render)
+@app.route('/upload-tokens', methods=['POST'])
+def upload_tokens():
+    try:
+        data = request.get_json()
+        if not data or "tokens" not in data:
+            return {"error": "Missing 'tokens' field in JSON body"}, 400
+
+        new_tokens = data["tokens"]
+        if not isinstance(new_tokens, list):
+            return {"error": "'tokens' must be a list"}, 400
+
+        # Validate each token by checking JWT expiry
+        now = time.time()
+        valid_tokens_list = []
+        expired_count = 0
+
+        for entry in new_tokens:
+            token = entry.get("token") if isinstance(entry, dict) else entry
+            if not token:
+                continue
+            try:
+                payload = token.split(".")[1]
+                payload += "=" * (-len(payload) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(payload))
+                if int(claims.get("exp", 0)) > now:
+                    valid_tokens_list.append({"token": token})
+                else:
+                    expired_count += 1
+            except Exception:
+                expired_count += 1
+
+        # Load existing tokens and merge
+        existing = load_tokens("BD") or []
+        existing_uids = set()
+        for e in existing:
+            t = e.get("token", "")
+            try:
+                p = t.split(".")[1]
+                p += "=" * (-len(p) % 4)
+                c = json.loads(base64.urlsafe_b64decode(p))
+                uid = c.get("account_id")
+                if uid:
+                    existing_uids.add(str(uid))
+            except Exception:
+                pass
+
+        # Add only new UIDs
+        for entry in valid_tokens_list:
+            t = entry.get("token", "")
+            try:
+                p = t.split(".")[1]
+                p += "=" * (-len(p) % 4)
+                c = json.loads(base64.urlsafe_b64decode(p))
+                uid = c.get("account_id")
+                if uid and str(uid) not in existing_uids:
+                    existing.append(entry)
+                    existing_uids.add(str(uid))
+            except Exception:
+                pass
+
+        # Save merged tokens
+        bank_path = os.path.join(BASE_DIR, "token_bd.json")
+        with open(bank_path, "w") as f:
+            json.dump(existing, f)
+
+        return {
+            "status": "ok",
+            "added": len(valid_tokens_list),
+            "expired": expired_count,
+            "total_in_bank": len(existing)
+        }
+
+    except Exception as e:
+        app.logger.error(f"Error uploading tokens: {e}")
+        return {"error": str(e)}, 500
 
 
 if __name__ == '__main__':
