@@ -1,20 +1,33 @@
 import os
 import json
 import base64
+import sys
+import binascii
+import requests
 import aiohttp
 import asyncio
 from datetime import datetime, date, time
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from telegram.request import HTTPXRequest
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
+
+# Allow importing protobuf definitions from the api directory
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'api'))
+import uid_generator_pb2  # noqa: E402
 
 # ============ CONFIGURATION ============
 API_URL = os.getenv("API_URL", "http://127.0.0.1:5000")
 ENCODED_KEY = os.getenv("ENCODED_KEY", "WkVYWFk=")
 API_KEY = base64.b64decode(ENCODED_KEY).decode()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")       # ← Set via environment variable
-ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]  # ← Set via environment variable
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
+
+# AES constants (must match api/app.py encrypt_message)
+MAIN_KEY = b'Yg&tc%DEuh6%Zc^8'
+MAIN_IV = b'6oyZDr22E3ychjM%'
 
 # ============ DATA FILES ============
 DATA_FILES = {
@@ -23,6 +36,8 @@ DATA_FILES = {
     'users': 'user_limits.json',
     'config': 'bot_config.json'
 }
+
+API_TOKEN_FILE = '/root/OWN-LIKE-BOT/api/token_bd.json'
 
 # ============ GLOBALS ============
 bot_status = "on"
@@ -66,26 +81,27 @@ def can_user_like(uid):
     if is_admin(uid):
         return True
     t = today_str()
-    if uid not in user_limits or user_limits[uid]['date'] != t:
-        user_limits[uid] = {'date': t, 'count': 0}
+    suid = str(uid)
+    if suid not in user_limits or user_limits[suid]['date'] != t:
+        user_limits[suid] = {'date': t, 'count': 0}
         return True
-    return user_limits[uid]['count'] < daily_limit
+    return user_limits[suid]['count'] < daily_limit
 
 def update_user_like(uid):
     if is_admin(uid):
         return
     t = today_str()
-    if uid not in user_limits or user_limits[uid]['date'] != t:
-        user_limits[uid] = {'date': t, 'count': 0}
-    user_limits[uid]['count'] += 1
+    suid = str(uid)
+    if suid not in user_limits or user_limits[suid]['date'] != t:
+        user_limits[suid] = {'date': t, 'count': 0}
+    user_limits[suid]['count'] += 1
     
     if t not in daily_stats:
         daily_stats[t] = {'total': 0, 'users': {}}
     daily_stats[t]['total'] += 1
-    uid_str = str(uid)
-    if uid_str not in daily_stats[t]['users']:
-        daily_stats[t]['users'][uid_str] = 0
-    daily_stats[t]['users'][uid_str] += 1
+    if suid not in daily_stats[t]['users']:
+        daily_stats[t]['users'][suid] = 0
+    daily_stats[t]['users'][suid] += 1
     save_all()
 
 async def call_like_api(region, uid):
@@ -93,10 +109,18 @@ async def call_like_api(region, uid):
         base = API_URL.rstrip("/") + "/"
         url = f"{base}like?uid={uid}&region={region}&key={API_KEY}"
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 else:
+                    # Surface the API's real error message instead of a bare HTTP code.
+                    try:
+                        body = await resp.json(content_type=None)
+                    except Exception:
+                        body = None
+                    if isinstance(body, dict) and body.get("error"):
+                        body.setdefault("status", body.get("status", resp.status))
+                        return body
                     return {"error": f"HTTP {resp.status}"}
     except asyncio.TimeoutError:
         return {"error": "Timeout"}
@@ -135,14 +159,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     msg = (
         "✨ *𝑭𝑹𝑬𝑬 𝑭𝑰𝑹𝑬 𝑳𝑰𝑲𝑬 𝑩𝑶𝑻* ✨\n"
-        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
         "💬 `/like REGION UID` – Send a like\n"
         "💬 `/help` – Show all commands\n"
         "💬 `/info` – Your remaining likes\n\n"
         "📌 *Example:* `/like IND 14160011100`\n"
         f"🔥 Your daily limit: `{daily_limit}` likes\n"
         "🌍 *Any region code works* (e.g., IND, USA, GER, etc.)\n"
-        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     )
     await reply(update, msg)
 
@@ -156,7 +180,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 `/like REGION UID` – Send 1 like (any region)\n"
         "🔹 `/info` – Check your remaining likes\n"
         "🔹 `/start` – Welcome message\n\n"
-        "*Example:* `/like IND 1234567890`\n"
+        "*Example:* `/like IND 14160011100`\n"
         "*Supports any region* – just type the code.\n\n"
         "👑 *Admin commands:*\n"
         "`/allow` – Allow current group\n"
@@ -177,7 +201,8 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply(update, "👑 *Admin Account*\n🔥 *Unlimited likes* – No daily limit.")
         return
     t = today_str()
-    used = user_limits.get(uid, {}).get('count', 0) if uid in user_limits and user_limits[uid]['date'] == t else 0
+    suid = str(uid)
+    used = user_limits.get(suid, {}).get('count', 0) if suid in user_limits and user_limits[suid]['date'] == t else 0
     remaining = daily_limit - used
     msg = (
         "🤖 *𝑩𝑶𝑻 𝑰𝑵𝑭𝑶*\n\n"
@@ -214,7 +239,7 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = update.effective_user.id
     if not can_user_like(user_id):
-        used = user_limits.get(user_id, {}).get('count', 0)
+        used = user_limits.get(str(user_id), {}).get('count', 0)
         await reply(update, f"⚠️ *Daily limit reached!*\nYou have used `{used}/{daily_limit}` likes today.\n💡 Try again tomorrow.")
         return
     
@@ -223,7 +248,10 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data is None or "error" in data:
         error_msg = data.get("error", "Unknown error") if data else "No response"
-        await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}\nPlease try again later.", parse_mode='Markdown')
+        if data and data.get("status") == 4:
+            await proc_msg.edit_text(f"🔑 *Token Bank Error*\n{error_msg}", parse_mode='Markdown')
+        else:
+            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}\nPlease try again later.", parse_mode='Markdown')
         return
     
     status = data.get('status')
@@ -244,7 +272,7 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if status == 1:
         update_user_like(user_id)
-        user_used = user_limits.get(user_id, {}).get('count', 0) if not is_admin(user_id) else "Unlimited"
+        user_used = user_limits.get(str(user_id), {}).get('count', 0) if not is_admin(user_id) else "Unlimited"
         result = (
             f"✅ *𝑳𝑰𝑲𝑬 𝑺𝑬𝑵𝑻* ✅\n\n"
             f"👤 *Player:* {player}\n"
@@ -273,6 +301,76 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = f"❓ *Unknown API response*\nStatus code: {status}\nPlease contact the bot admin."
     
     await proc_msg.edit_text(result, parse_mode='Markdown')
+
+# ============ JWT TOKEN UPLOAD HANDLER ============
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ *Admin only command*")
+        return
+
+    document = update.message.document
+    if not document:
+        await reply(update, "❌ *No document found.*")
+        return
+
+    file_name = document.file_name or ""
+    if not file_name.endswith(".json"):
+        await reply(update, "❌ *Please upload a valid JSON file.*")
+        return
+
+    try:
+        file = await context.bot.get_document(document.file_id)
+        file_bytes = await file.download_as_bytearray()
+        
+        try:
+            new_tokens = json.loads(file_bytes.decode('utf-8'))
+        except Exception as e:
+            await reply(update, f"❌ *Invalid JSON file:* `{str(e)[:100]}`")
+            return
+
+        working = []
+        failed = []
+
+        for item in new_tokens:
+            token = item.get('token') if isinstance(item, dict) else item
+            if not token:
+                continue
+            
+            try:
+                message = uid_generator_pb2.uid_generator()
+                message.saturn_ = int('5933029554')
+                message.garena = 1
+                protobuf_data = message.SerializeToString()
+                cipher = AES.new(MAIN_KEY, AES.MODE_CBC, MAIN_IV)
+                padded = pad(protobuf_data, AES.block_size)
+                encrypted = cipher.encrypt(padded)
+                edata_hex = binascii.hexlify(encrypted).decode('utf-8')
+                
+                headers = {
+                    'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)',
+                    'Authorization': f'Bearer {token}',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Expect': '100-continue',
+                    'X-Unity-Version': '2018.4.11f1',
+                    'X-GA': 'v1 1',
+                    'ReleaseVersion': 'OB55'
+                }
+                
+                r = requests.post('https://clientbp.ggpolarbear.com/GetPlayerPersonalShow', 
+                                 data=bytes.fromhex(edata_hex), headers=headers, verify=False, timeout=10)
+                if r.status_code == 200:
+                    working.append(token)
+                else:
+                    failed.append(token)
+            except Exception as e:
+                failed.append(token)
+
+        with open(API_TOKEN_FILE, 'w') as f:
+            json.dump([{'token': t} for t in working], f, indent=2)
+
+        await reply(update, f"✅ *Token Update Complete*\n\n✅ Working: {len(working)}\n❌ Expired: {len(failed)}\n📁 Total saved: {len(working)}")
+    except Exception as e:
+        await reply(update, f"❌ *Error processing file:* `{str(e)[:100]}`")
 
 # ============ ADMIN COMMANDS ============
 async def allow_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -379,6 +477,7 @@ def main():
     app.add_handler(CommandHandler("setprivate", set_private))
     app.add_handler(CommandHandler("setpublic", set_public))
     app.add_handler(CommandHandler("setlimit", set_limit))
+    app.add_handler(MessageHandler(filters.Document, handle_document))
     
     print("🤖 Bot is running...")
     print("   → Normal users: only in groups, daily limit applies")

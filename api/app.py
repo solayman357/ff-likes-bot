@@ -6,6 +6,8 @@ import binascii
 import aiohttp
 import requests
 import json
+import base64
+import time
 import like_pb2
 import uid_generator_pb2
 import visit_count_pb2
@@ -43,6 +45,32 @@ def load_tokens(region):
     except Exception as e:
         app.logger.error(f"Error loading tokens for region {region}: {e}")
         return None
+
+
+def token_expiry(token):
+    """Return the JWT 'exp' claim (unix seconds), or 0 if it cannot be read."""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+        return int(claims.get("exp", 0))
+    except Exception:
+        return 0
+
+
+def valid_tokens(tokens):
+    """Filter out expired/duplicate tokens so we never call the API with dead JWTs."""
+    now = time.time()
+    result = []
+    seen = set()
+    for entry in tokens or []:
+        token = entry.get("token") if isinstance(entry, dict) else None
+        if not token or token in seen:
+            continue
+        if token_expiry(token) > now:
+            seen.add(token)
+            result.append(entry)
+    return result
 
 
 def encrypt_message(plaintext):
@@ -102,9 +130,13 @@ async def send_multiple_requests(uid, region, url):
         tokens = load_tokens(region)
         if tokens is None:
             return None
+        tokens = valid_tokens(tokens)
+        if not tokens:
+            app.logger.error("send_multiple_requests: no unexpired tokens available")
+            return None
         tasks = []
-        for i in range(100):
-            token = tokens[i % len(tokens)]["token"]
+        for i in range(min(240, len(tokens))):
+            token = tokens[i]["token"]
             tasks.append(send_request(encrypted_uid, token, url))
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return results
@@ -193,13 +225,40 @@ def handle_requests():
             tokens = load_tokens(region)
             if not tokens:
                 raise Exception("Failed to load tokens.")
-            token = tokens[0]['token']
+
+            tokens = valid_tokens(tokens)
+            if not tokens:
+                return app.response_class(
+                    response=json.dumps(OrderedDict([
+                        ("error", "All API tokens have expired. Please refresh the token bank with fresh JWT tokens."),
+                        ("status", 4)
+                    ]), separators=(',', ':')),
+                    status=503,
+                    mimetype='application/json'
+                )
+
             encrypted_uid = enc(uid)
             if encrypted_uid is None:
                 raise Exception("Encryption of UID failed.")
-            before = make_request(encrypted_uid, region, token)
-            if before is None:
-                raise Exception("Failed to get initial info.")
+
+            # Rotate across unexpired tokens until one is accepted by the game server.
+            working_token = None
+            before = None
+            for entry in tokens[:20]:
+                candidate = entry["token"]
+                before = make_request(encrypted_uid, region, candidate)
+                if before is not None:
+                    working_token = candidate
+                    break
+            if before is None or working_token is None:
+                return app.response_class(
+                    response=json.dumps(OrderedDict([
+                        ("error", "Token bank is unusable: every available token was rejected by the game server. Please refresh the token bank."),
+                        ("status", 4)
+                    ]), separators=(',', ':')),
+                    status=503,
+                    mimetype='application/json'
+                )
             before_like = before.AccountInfo.Likes
 
             if region == "IND":
@@ -211,7 +270,15 @@ def handle_requests():
 
             asyncio.run(send_multiple_requests(uid, region, url))
 
-            after = make_request(encrypted_uid, region, token)
+            after = make_request(encrypted_uid, region, working_token)
+            if after is None:
+                for entry in tokens[:20]:
+                    candidate = entry["token"]
+                    if candidate == working_token:
+                        continue
+                    after = make_request(encrypted_uid, region, candidate)
+                    if after is not None:
+                        break
             if after is None:
                 raise Exception("Failed to get final info.")
             after_like = after.AccountInfo.Likes

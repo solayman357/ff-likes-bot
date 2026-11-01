@@ -11,9 +11,22 @@ venv/
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Secrets - NEVER commit tokens or API keys
-*.json
-!*.example.json
+# Dependencies & node_modules
+node_modules/
+api/node_modules/
+
+# Backups & temporary files
+*.bak*
+*.tmp
+api/*.bak*
+api/token_bd.json.bak.*
+
+# Bot local state & guest account passwords
+bot/allowed_groups.json
+bot/daily_stats.json
+bot/user_limits.json
+bot/bot_config.json
+data/guests/
 
 # OS
 .DS_Store
@@ -25,5 +38,7 @@ Thumbs.db
 *.swp
 *.swo
 
-# Logs
+# Logs & Test outputs
 *.log
+token_test_results.json
+api/test_tokens.py
