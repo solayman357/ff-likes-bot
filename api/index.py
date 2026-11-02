@@ -32,12 +32,11 @@ app = Flask(__name__)
 # ============================================================
 #   ⚙️ CONFIG (RIFAT)
 # ============================================================
-NORMAL_API_KEY   = "RIFAT_API_KEY_HERE"          # 🔴 আপনার গোপন key
-INFO_API_ENDPOINT = "YOUR_INFO_API_URL"           # 🔴 আপনার info API
+NORMAL_API_KEY   = "Solayman"
+INFO_API_ENDPOINT = ""
 
 JWT_API_URLS = [
-    "YOUR_JWT_API_URL_1",                         # 🔴 API #1
-    "YOUR_JWT_API_URL_2",                         # 🔴 API #2
+    "https://kawsarxjwt.lovable.app/api/public/token",
 ]
 
 # ============================================================
@@ -556,10 +555,6 @@ def process_like_request(uid, server_name, client_ip, require_key=True, api_key=
 # ============================================================
 #   🌐 ROUTES
 # ============================================================
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({"status": "ok", "service": "ff-likes-api"})
-
 @app.route('/like', methods=['GET'])
 def handle_like():
     return process_like_request(

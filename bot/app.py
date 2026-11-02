@@ -102,10 +102,10 @@ def update_user_like(uid):
     daily_stats[t]['users'][suid] += 1
     save_all()
 
-async def call_like_api(region, uid):
+async def call_like_api(server_name, uid):
     try:
         base = API_URL.rstrip("/") + "/"
-        url = f"{base}like?uid={uid}&region={region}&key={API_KEY}"
+        url = f"{base}like?uid={uid}&server_name={server_name}&key={API_KEY}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                 if resp.status == 200:
