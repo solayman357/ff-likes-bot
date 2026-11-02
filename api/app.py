@@ -147,8 +147,8 @@ async def send_multiple_requests(uid, region, url):
 def create_protobuf(uid):
     try:
         message = uid_generator_pb2.uid_generator()
-        message.saturn_ = int(uid)
-        message.garena = 1
+        message.krishna_ = int(uid)
+        message.teamXdarks = 1
         return message.SerializeToString()
     except Exception as e:
         app.logger.error(f"Error creating uid protobuf: {e}")
