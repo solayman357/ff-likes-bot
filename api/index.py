@@ -397,7 +397,7 @@ def get_player_info(encrypted_uid, server_name, token):
     elif server_name in {"BR", "US", "SAC", "NA"}:
         url = "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
     else:
-        url = "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow"
+        url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
 
     edata = bytes.fromhex(encrypted_uid)
     headers = {
@@ -504,7 +504,7 @@ def process_like_request(uid, server_name, client_ip, require_key=True, api_key=
     elif server_name in {"BR", "US", "SAC", "NA"}:
         like_url = "https://client.us.freefiremobile.com/LikeProfile"
     else:
-        like_url = "https://clientbp.ggpolarbear.com/LikeProfile"
+        like_url = "https://client.ind.freefiremobile.com/LikeProfile"
 
     asyncio.run(send_all_likes(uid, server_name, like_url, accounts, encrypted_uid))
 
