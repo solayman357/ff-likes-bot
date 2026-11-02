@@ -2,10 +2,12 @@ import os
 import json
 import base64
 import sys
+import threading
 import requests
 import aiohttp
 import asyncio
 from datetime import datetime, date, time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from telegram.request import HTTPXRequest
@@ -428,8 +430,39 @@ async def set_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_all()
     await reply(update, f"✅ *Daily limit set to `{daily_limit}` likes per user*")
 
+# ============ RENDER HEALTH SERVER (free web_service must bind $PORT) ============
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path in ("/", "/health"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        # Silence default stderr logging to keep Render logs clean
+        return
+
+
+def start_health_server():
+    """Run a lightweight HTTP health server on $PORT in a daemon thread.
+    Required by Render free web_service (no Background Worker on free plan).
+    Telegram polling keeps running on the main thread via app.run_polling().
+    """
+    port = int(os.environ.get("PORT", "10000"))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    print(f"🌐 Health server listening on 0.0.0.0:{port}")
+
+
 # ============ MAIN ============
 def main():
+    start_health_server()
+
     load_data()
     
     request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
