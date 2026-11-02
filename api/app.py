@@ -15,6 +15,7 @@ from google.protobuf.message import DecodeError
 from collections import OrderedDict
 
 import os
+import concurrent.futures
 
 app = Flask(__name__)
 
@@ -25,9 +26,91 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 API_KEY_ENV = os.getenv("API_KEY", "ZEXXY")
 VALID_API_KEYS = {API_KEY_ENV}
 
+# 🔑 JWT API URLs (comma-separated) for generating tokens from account credentials
+JWT_API_URLS_STR = os.getenv("JWT_API_URLS", "")
+JWT_API_URLS = [u.strip() for u in JWT_API_URLS_STR.split(",") if u.strip()]
+
 # 🔢 Like limit tracking
 daily_limit = 250
 used_count = 0
+
+# 📂 Account files
+ACCOUNT_FILES = {
+    "IND": os.path.join(BASE_DIR, "account_ind.txt"),
+    "BD": os.path.join(BASE_DIR, "account_bd.txt"),
+}
+for _r in {"BR", "US", "SAC", "NA"}:
+    ACCOUNT_FILES[_r] = os.path.join(BASE_DIR, "account_ind.txt")
+
+
+def load_accounts(server_name):
+    """Load UID:password accounts from file."""
+    path = ACCOUNT_FILES.get(server_name, ACCOUNT_FILES["BD"])
+    accounts = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if ":" in line:
+                    uid, pwd = line.split(":", 1)
+                    uid = uid.strip()
+                    pwd = pwd.strip()
+                    if uid and pwd and uid.isdigit():
+                        accounts.append({"uid": uid, "password": pwd})
+    except Exception as e:
+        app.logger.error(f"Error loading accounts for {server_name}: {e}")
+    return accounts
+
+
+def generate_jwt_from_account(uid, password, jwt_url):
+    """Call JWT API to get a session token for an account."""
+    try:
+        import urllib.parse
+        encoded_pwd = urllib.parse.quote(password, safe="")
+        url = f"{jwt_url}?uid={uid}&password={encoded_pwd}"
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            token = None
+            if isinstance(data, dict):
+                if "token" in data:
+                    token = data["token"]
+                elif "access_token" in data:
+                    token = data["access_token"]
+                elif "data" in data and isinstance(data["data"], dict):
+                    token = data["data"].get("token")
+            if token:
+                return token
+    except Exception as e:
+        app.logger.error(f"JWT gen error for {uid}: {e}")
+    return None
+
+
+def generate_tokens_for_accounts(server_name, max_tokens=300):
+    """Generate fresh JWT tokens from accounts via JWT API."""
+    accounts = load_accounts(server_name)
+    if not accounts or not JWT_API_URLS:
+        return []
+
+    tokens = []
+    jwt_url = JWT_API_URLS[0]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {}
+        for acc in accounts[:max_tokens]:
+            future = executor.submit(generate_jwt_from_account, acc["uid"], acc["password"], jwt_url)
+            futures[future] = acc
+
+        for future in concurrent.futures.as_completed(futures, timeout=60):
+            token = future.result()
+            if token:
+                tokens.append(token)
+            if len(tokens) >= max_tokens:
+                break
+
+    return tokens
 
 
 def load_tokens(region):
@@ -118,7 +201,7 @@ async def send_request(encrypted_uid, token, url):
         return None
 
 
-async def send_multiple_requests(uid, region, url):
+async def send_multiple_requests(uid, region, url, token_list=None):
     try:
         protobuf_message = create_protobuf_message(uid, region)
         if protobuf_message is None:
@@ -126,10 +209,14 @@ async def send_multiple_requests(uid, region, url):
         encrypted_uid = encrypt_message(protobuf_message)
         if encrypted_uid is None:
             return None
-        tokens = load_tokens(region)
-        if tokens is None:
-            return None
-        tokens = valid_tokens(tokens)
+        # Use pre-generated tokens if provided, otherwise load from bank
+        if token_list is not None:
+            tokens = [{"token": t} for t in token_list]
+        else:
+            tokens = load_tokens(region)
+            if tokens is None:
+                return None
+            tokens = valid_tokens(tokens)
         if not tokens:
             app.logger.error("send_multiple_requests: no unexpired tokens available")
             return None
@@ -221,15 +308,12 @@ def handle_requests():
         def process_request():
             global used_count  # ✅ fix added again (for nested function)
 
-            tokens = load_tokens(region)
-            if not tokens:
-                raise Exception("Failed to load tokens.")
-
-            tokens = valid_tokens(tokens)
-            if not tokens:
+            # 🔑 Generate fresh JWT tokens from accounts via JWT API
+            jwt_tokens = generate_tokens_for_accounts(region, max_tokens=300)
+            if not jwt_tokens:
                 return app.response_class(
                     response=json.dumps(OrderedDict([
-                        ("error", "All API tokens have expired. Please refresh the token bank with fresh JWT tokens."),
+                        ("error", "Failed to generate JWT tokens from accounts. Check JWT_API_URLS and account files."),
                         ("status", 4)
                     ]), separators=(',', ':')),
                     status=503,
@@ -240,10 +324,13 @@ def handle_requests():
             if encrypted_uid is None:
                 raise Exception("Encryption of UID failed.")
 
-            # Rotate across unexpired tokens until one is accepted by the game server.
+            # Convert string tokens to entry dicts for compatibility
+            token_entries = [{"token": t} for t in jwt_tokens]
+
+            # Rotate across tokens until one is accepted by the game server.
             working_token = None
             before = None
-            for entry in tokens[:20]:
+            for entry in token_entries[:20]:
                 candidate = entry["token"]
                 before = make_request(encrypted_uid, region, candidate)
                 if before is not None:
@@ -252,7 +339,7 @@ def handle_requests():
             if before is None or working_token is None:
                 return app.response_class(
                     response=json.dumps(OrderedDict([
-                        ("error", "Token bank is unusable: every available token was rejected by the game server. Please refresh the token bank."),
+                        ("error", "Token bank is unusable: every available token was rejected by the game server."),
                         ("status", 4)
                     ]), separators=(',', ':')),
                     status=503,
@@ -267,12 +354,11 @@ def handle_requests():
             else:
                 url = "https://client.ind.freefiremobile.com/LikeProfile"
 
-            asyncio.run(send_multiple_requests(uid, region, url))
+            asyncio.run(send_multiple_requests(uid, region, url, token_list=jwt_tokens))
 
             after = make_request(encrypted_uid, region, working_token)
             if after is None:
-                for entry in tokens[:20]:
-                    candidate = entry["token"]
+                for candidate in jwt_tokens[:20]:
                     if candidate == working_token:
                         continue
                     after = make_request(encrypted_uid, region, candidate)
