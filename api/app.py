@@ -26,7 +26,7 @@ API_KEY_ENV = os.getenv("API_KEY", "ZEXXY")
 VALID_API_KEYS = {API_KEY_ENV}
 
 # 🔢 Like limit tracking
-daily_limit = 200
+daily_limit = 250
 used_count = 0
 
 
@@ -134,7 +134,7 @@ async def send_multiple_requests(uid, region, url):
             app.logger.error("send_multiple_requests: no unexpired tokens available")
             return None
         tasks = []
-        for i in range(min(240, len(tokens))):
+        for i in range(min(300, len(tokens))):
             token = tokens[i]["token"]
             tasks.append(send_request(encrypted_uid, token, url))
         results = await asyncio.gather(*tasks, return_exceptions=True)

@@ -159,7 +159,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💬 `/like REGION UID` – Send a like\n"
         "💬 `/help` – Show all commands\n"
         "💬 `/info` – Your remaining likes\n\n"
-        "📌 *Example:* `/like IND 14160011100`\n"
+        "📌 *Example:* `/like BD UID`\n"
         f"🔥 Your daily limit: `{daily_limit}` likes\n"
         "🌍 *Any region code works* (e.g., IND, USA, GER, etc.)\n"
         "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
@@ -176,7 +176,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 `/like REGION UID` – Send 1 like (any region)\n"
         "🔹 `/info` – Check your remaining likes\n"
         "🔹 `/start` – Welcome message\n\n"
-        "*Example:* `/like IND 14160011100`\n"
+        "*Example:* `/like BD UID`\n"
         "*Supports any region* – just type the code.\n\n"
         "👑 *Admin commands:*\n"
         "`/allow` – Allow current group\n"
@@ -224,7 +224,7 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if len(context.args) != 2:
-        await reply(update, "❌ *Usage:* `/like REGION UID`\nExample: `/like IND 14160011100`")
+        await reply(update, "❌ *Usage:* `/like REGION UID`\nExample: `/like BD UID`")
         return
     
     region = context.args[0].upper()
@@ -451,7 +451,7 @@ def main():
     app.add_handler(CommandHandler("setprivate", set_private))
     app.add_handler(CommandHandler("setpublic", set_public))
     app.add_handler(CommandHandler("setlimit", set_limit))
-    app.add_handler(MessageHandler(filters.Document, handle_document))
+    app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
     
     print("🤖 Bot is running...")
     print("   → Normal users: only in groups, daily limit applies")
