@@ -102,10 +102,10 @@ def update_user_like(uid):
     daily_stats[t]['users'][suid] += 1
     save_all()
 
-async def call_like_api(region, uid):
+async def call_like_api(server_name, uid):
     try:
         base = API_URL.rstrip("/") + "/"
-        url = f"{base}like?uid={uid}&region={region}&key={API_KEY}"
+        url = f"{base}like?uid={uid}&server_name={server_name}&key={API_KEY}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                 if resp.status == 200:
@@ -252,22 +252,29 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}\nPlease try again later.", parse_mode='Markdown')
         return
     
+    # Handle error responses from ZIP API
+    if data.get("error"):
+        error_msg = data.get("error", "Unknown error")
+        if data.get("status") == 0:
+            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}\nPlease try again later.", parse_mode='Markdown')
+        else:
+            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}", parse_mode='Markdown')
+        return
+
     status = data.get('status')
     if status is None:
         await proc_msg.edit_text("❌ *Invalid API response*\nThe server returned an unexpected format.", parse_mode='Markdown')
         return
-    
+
     player = data.get('PlayerNickname', 'Unknown')
     uid_resp = data.get('UID', uid)
-    region_resp = data.get('Region', region)
+    region_resp = region
     level = data.get('Level', 'N/A')
     before = data.get('LikesbeforeCommand', 0)
     after = data.get('LikesafterCommand', 0)
     given = data.get('LikesGivenByAPI', 0)
-    api_limit = data.get('daily_limit', 20)
-    api_used = data.get('used', 0)
-    api_rem = data.get('remaining', 20)
-    
+    api_rem = data.get('remains', 'N/A')
+
     if status == 1:
         update_user_like(user_id)
         user_used = user_limits.get(str(user_id), {}).get('count', 0) if not is_admin(user_id) else "Unlimited"
@@ -291,8 +298,7 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⭐ *Level:* {level}\n\n"
             f"❌ *Likes sent:* 0\n"
             f"📊 *Total likes:* {before} (unchanged)\n\n"
-            f"📅 *API daily limit:* {api_used}/{api_limit}\n"
-            f"🟢 *API remaining:* {api_rem}\n\n"
+            f"📅 *API remaining:* {api_rem}\n\n"
             f"😔 *Could not send like to {player}*"
         )
     else:
