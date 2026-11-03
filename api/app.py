@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 API_KEY = "Solayman"
 WRONG_KEY_RESPONSE = {
     "error": "Unauthorized",
-    "credits": "@HAFSAN_KUN"
+    "credits": "@DCFsolayman"
 }
 # -------------------------------
 
@@ -333,10 +333,13 @@ def handle_requests():
     after_likes = int(after_info.AccountInfo.Likes) if (after_info and hasattr(after_info, 'AccountInfo')) else before_likes
     nickname = "N/A"
     actual_uid = int(uid_param)
+    player_level = 0
     if after_info and hasattr(after_info, 'AccountInfo'):
         actual_uid = int(after_info.AccountInfo.UID)
         if after_info.AccountInfo.PlayerNickname:
             nickname = str(after_info.AccountInfo.PlayerNickname)
+        if hasattr(after_info.AccountInfo, 'Level') and after_info.AccountInfo.Level:
+            player_level = int(after_info.AccountInfo.Level)
 
     increment = after_likes - before_likes
     status = 1 if increment > 0 else 2
@@ -353,6 +356,7 @@ def handle_requests():
         "LikesbeforeCommand": before_likes,
         "PlayerNickname": nickname,
         "UID": actual_uid,
+        "Level": player_level,
         "status": status,
         "TokensUsedThisRequest": len(selected),
         "SuccessfulSends": success_count,
@@ -361,7 +365,7 @@ def handle_requests():
             "capacity": total_cap,
             "remaining": total_cap - total_used
         },
-        "credits": "@HAFSAN_KUN"
+        "credits": "@DCFsolayman"
     })
 
 
