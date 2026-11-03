@@ -1,0 +1,17 @@
+[Unit]
+Description=FF Likes API Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/OWN-LIKE-BOT/api
+Environment=API_KEY=Solayman
+Environment=JWT_API_URLS=https://kawsarxjwt.lovable.app/api/public/token
+Environment=PORT=5000
+ExecStart=/usr/bin/python3 /root/OWN-LIKE-BOT/api/index.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

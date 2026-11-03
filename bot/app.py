@@ -17,7 +17,7 @@ import uid_generator_pb2  # noqa: E402
 
 # ============ CONFIGURATION ============
 API_URL = os.getenv("API_URL", "http://127.0.0.1:5000")
-ENCODED_KEY = os.getenv("ENCODED_KEY", "WkVYWFk=")
+ENCODED_KEY = os.getenv("ENCODED_KEY", "U29sYXltYW4=")
 API_KEY = base64.b64decode(ENCODED_KEY).decode()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
