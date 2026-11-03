@@ -561,13 +561,26 @@ def health_check():
 
 @app.route('/like', methods=['GET'])
 def handle_like():
+    server_name = request.args.get("server_name", "").upper() or request.args.get("region", "").upper()
     return process_like_request(
         request.args.get("uid"),
-        request.args.get("server_name", "").upper(),
+        server_name,
         request.remote_addr,
         True,
         request.args.get("key")
     )
+
+
+@app.route('/remain', methods=['GET'])
+def remain_info():
+    with TRACKER_LOCK:
+        total_used = sum(v[0] for v in tracker.values())
+    return jsonify({
+        "daily_limit": KEY_LIMIT,
+        "remaining": max(KEY_LIMIT - total_used, 0),
+        "used": total_used,
+        "reset_info": "4:00 AM BD Time"
+    })
 
 
 @app.route('/', methods=['GET'])
