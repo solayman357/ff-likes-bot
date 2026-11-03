@@ -1,432 +1,439 @@
 from flask import Flask, request, jsonify
 import asyncio
-import aiohttp
-import requests
-import json
-import base64
-import time
-import os
-from collections import OrderedDict
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 import binascii
+import aiohttp
+import requests
+import json
+import os
+import like_pb2
+import like_count_pb2
+import uid_generator_pb2
+import threading
+import urllib3
+from datetime import datetime, timezone
 
-# Protobuf modules
-import freefire_pb2
-import core_pb2
-import account_show_pb2
-import send_like_pb2
-from google.protobuf import json_format, message as protobuf_message
+# -------------------------------
+# API KEY CONFIGURATION
+# -------------------------------
+API_KEY = "Solayman"
+WRONG_KEY_RESPONSE = {
+    "error": "Unauthorized",
+    "credits": "@HAFSAN_KUN"
+}
+# -------------------------------
+
+TOKENS_PER_FILE = 111
+LIKES_PER_TOKEN_PER_DAY = 150
+LIKES_PER_USER_REQUEST = 111
+TOKEN_FILES = ["token_bd_1.json", "token_bd_2.json"]
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# -------------------------------
+# STATE (Vercel is stateless → /tmp ব্যবহার)
+# -------------------------------
+STATE_FILE = "/tmp/token_usage_state.json"
+state_lock = threading.Lock()
+
+
+def _today_utc():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def load_state():
+    default = {
+        "date": _today_utc(),
+        "usage": {},
+        "file_pointer": 0,
+        "file_used": {}
+    }
+    if not os.path.exists(STATE_FILE):
+        return default
+    try:
+        with open(STATE_FILE, "r") as f:
+            state = json.load(f)
+        if state.get("date") != _today_utc():
+            print("New UTC day -> resetting limits")
+            return default
+        state.setdefault("usage", {})
+        state.setdefault("file_pointer", 0)
+        state.setdefault("file_used", {})
+        return state
+    except Exception as e:
+        print(f"State load error: {e}")
+        return default
+
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f)
+    except Exception as e:
+        print(f"State save error: {e}")
+
+
+def load_token_file(file_name):
+    try:
+        with open(file_name, "r") as f:
+            tokens = json.load(f)
+        if isinstance(tokens, list) and all(isinstance(t, dict) and "token" in t for t in tokens):
+            return tokens
+        print(f"Warning: {file_name} invalid format.")
+        return []
+    except FileNotFoundError:
+        print(f"Warning: {file_name} not found.")
+        return []
+    except json.JSONDecodeError:
+        print(f"Warning: {file_name} invalid JSON.")
+        return []
+
+
+def load_all_tokens():
+    all_tokens = []
+    for fname in TOKEN_FILES:
+        tokens = load_token_file(fname)
+        print(f"Loaded {len(tokens)} tokens from {fname}")
+        for t in tokens:
+            all_tokens.append((fname, t))
+    return all_tokens
+
+
+def encrypt_message(plaintext):
+    key = b'Yg&tc%DEuh6%Zc^8'
+    iv = b'6oyZDr22E3ychjM%'
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    padded = pad(plaintext, AES.block_size)
+    return binascii.hexlify(cipher.encrypt(padded)).decode('utf-8')
+
+
+def create_protobuf_message(user_id, region):
+    message = like_pb2.like()
+    message.uid = int(user_id)
+    message.region = region
+    return message.SerializeToString()
+
+
+def create_protobuf_for_profile_check(uid):
+    message = uid_generator_pb2.uid_generator()
+    message.krishna_ = int(uid)
+    message.teamXdarks = 1
+    return message.SerializeToString()
+
+
+def enc_profile_check_payload(uid):
+    return encrypt_message(create_protobuf_for_profile_check(uid))
+
+
+async def send_single_like_request(encrypted_like_payload, token_dict, url):
+    edata = bytes.fromhex(encrypted_like_payload)
+    token_value = token_dict.get("token", "")
+    if not token_value:
+        return 999
+    headers = {
+        'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
+        'Connection': "Keep-Alive",
+        'Accept-Encoding': "gzip",
+        'Authorization': f"Bearer {token_value}",
+        'Content-Type': "application/x-www-form-urlencoded",
+        'Expect': "100-continue",
+        'X-Unity-Version': "2018.4.11f1",
+        'X-GA': "v1 1",
+        'ReleaseVersion': "OB55"
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data=edata, headers=headers,
+                                    timeout=aiohttp.ClientTimeout(total=10)) as response:
+                return response.status
+    except asyncio.TimeoutError:
+        return 998
+    except Exception:
+        return 997
+
+
+def make_profile_check_request(encrypted_profile_payload, server_name, token_dict):
+    token_value = token_dict.get("token", "")
+    if not token_value:
+        return None
+    if server_name == "IND":
+        url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
+    else:
+        url = "https://clientbp.ppmainecoonghj.com/GetPlayerPersonalShow"
+
+    edata = bytes.fromhex(encrypted_profile_payload)
+    headers = {
+        'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
+        'Connection': "Keep-Alive",
+        'Accept-Encoding': "gzip",
+        'Authorization': f"Bearer {token_value}",
+        'Content-Type': "application/x-www-form-urlencoded",
+        'Expect': "100-continue",
+        'X-Unity-Version': "2018.4.11f1",
+        'X-GA': "v1 1",
+        'ReleaseVersion': "OB55"
+    }
+    try:
+        response = requests.post(url, data=edata, headers=headers, verify=False, timeout=10)
+        response.raise_for_status()
+        return decode_protobuf_profile_info(response.content)
+    except Exception as e:
+        print(f"Profile check error: {e}")
+        return None
+
+
+def decode_protobuf_profile_info(binary_data):
+    try:
+        items = like_count_pb2.Info()
+        items.ParseFromString(binary_data)
+        return items
+    except Exception as e:
+        print(f"Decode error: {e}")
+        return None
+
+
+def get_like_api_url(server_name):
+    if server_name == "IND":
+        return "https://client.ind.freefiremobile.com/LikeProfile"
+    elif server_name in {"BR", "US", "SAC", "NA"}:
+        return "https://client.us.freefiremobile.com/LikeProfile"
+    else:
+        return "https://clientbp.ppmainecoonghj.com/LikeProfile"
+
+
+def select_tokens_for_likes(all_tokens, required_count, state):
+    usage = state["usage"]
+    selected = []
+    pointer = state.get("file_pointer", 0)
+
+    file_order = list(range(len(TOKEN_FILES)))
+    file_order = file_order[pointer:] + file_order[:pointer]
+
+    for file_idx in file_order:
+        if len(selected) >= required_count:
+            break
+        fname = TOKEN_FILES[file_idx]
+        tokens_in_file = [t for (f, t) in all_tokens if f == fname]
+        for token_dict in tokens_in_file:
+            if len(selected) >= required_count:
+                break
+            tok = token_dict["token"]
+            used = usage.get(tok, 0)
+            if used < LIKES_PER_TOKEN_PER_DAY:
+                selected.append((fname, token_dict, used))
+        state["file_pointer"] = (file_idx + 1) % len(TOKEN_FILES)
+
+    return selected
+
+
+def get_next_profile_token(all_tokens, state):
+    usage = state["usage"]
+    for fname, token_dict in all_tokens:
+        tok = token_dict["token"]
+        if usage.get(tok, 0) < LIKES_PER_TOKEN_PER_DAY:
+            return token_dict
+    return all_tokens[0][1] if all_tokens else None
+
 
 app = Flask(__name__)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ✅ Valid API keys
-API_KEY_ENV = os.getenv("API_KEY", "Solayman")
-VALID_API_KEYS = {API_KEY_ENV}
-
-# 🔢 Like limit tracking
-daily_limit = 250
-used_count = 0
-
-# 🔑 Garena API constants (from freefire-like-and-guest-api)
-MAIN_KEY = base64.b64decode('WWcmdGMlREV1aDYlWmNeOA==')   # b'Yg&tc%DEuh6%Zc^8'
-MAIN_IV = base64.b64decode('Nm95WkRyMjJFM3ljaGpNJQ==')       # b'6oyZDr22E3ychjM%'
-RELEASEVERSION = "OB50"
-USERAGENT = "Dalvik/2.1.0 (Linux; U; Android 13; CPH2095 Build/RKQ1.211119.001)"
-
-CLIENT_SECRET = "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3"
-CLIENT_ID = "100067"
-
-SUPPORTED_REGIONS = ["IND", "BR", "SG", "RU", "ID", "TW", "US", "VN", "TH", "ME", "PK", "CIS", "BD"]
-
-# 📂 Account files
-ACCOUNT_FILES = {
-    "IND": os.path.join(BASE_DIR, "account_ind.txt"),
-    "BD": os.path.join(BASE_DIR, "account_bd.txt"),
-}
-for _r in {"BR", "US", "SAC", "NA"}:
-    ACCOUNT_FILES[_r] = os.path.join(BASE_DIR, "account_ind.txt")
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  CRYPTO HELPERS
-# ════════════════════════════════════════════════════════════════════════════
-
-def pad_pkcs7(data: bytes) -> bytes:
-    padding_length = AES.block_size - (len(data) % AES.block_size)
-    padding = bytes([padding_length] * padding_length)
-    return data + padding
-
-
-def aes_cbc_encrypt(key: bytes, iv: bytes, plaintext: bytes) -> bytes:
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    return cipher.encrypt(pad_pkcs7(plaintext))
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  ACCOUNT LOADER
-# ════════════════════════════════════════════════════════════════════════════
-
-def load_accounts(server_name: str):
-    """Load UID:password accounts from file."""
-    path = ACCOUNT_FILES.get(server_name, ACCOUNT_FILES["BD"])
-    accounts = []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if ":" in line:
-                    uid, pwd = line.split(":", 1)
-                    uid = uid.strip()
-                    pwd = pwd.strip()
-                    if uid and pwd and uid.isdigit():
-                        accounts.append({"uid": uid, "password": pwd})
-    except Exception as e:
-        app.logger.error(f"Error loading accounts for {server_name}: {e}")
-    return accounts
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  JWT GENERATION (Garena real OAuth + MajorLogin flow)
-# ════════════════════════════════════════════════════════════════════════════
-
-async def get_access_token(uid: str, password: str):
-    """Get OAuth access token from Garena's guest token grant endpoint."""
-    url = "https://ffmconnect.live.gop.garenanow.com/oauth/guest/token/grant"
-    payload = f"uid={uid}&password={password}&response_type=token&client_type=2&client_secret={CLIENT_SECRET}&client_id={CLIENT_ID}"
-    headers = {
-        "User-Agent": USERAGENT,
-        "Connection": "Keep-Alive",
-        "Accept-Encoding": "gzip",
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, data=payload, headers=headers, timeout=20) as resp:
-            data = await resp.json()
-            return data.get("access_token", "0"), data.get("open_id", "0")
-
-
-async def create_jwt(uid: str, password: str):
-    """Generate a genuine Garena Free Fire JWT session token."""
-    access_token, open_id = await get_access_token(uid, password)
-    if access_token == "0":
-        raise ValueError("Failed to obtain access token")
-
-    json_data = json.dumps({
-        "open_id": open_id,
-        "open_id_type": "4",
-        "login_token": access_token,
-        "orign_platform_type": "4",
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        "api": "Free Fire Like API",
+        "status": "online",
+        "endpoints": {
+            "/like": "?key=YOUR_KEY&uid=UID&server_name=BD",
+            "/token_info": "?key=YOUR_KEY"
+        },
+        "credits": "@HAFSAN_KUN"
     })
 
-    # Build LoginReq protobuf
-    login_req = freefire_pb2.LoginReq()
-    json_format.ParseDict(json.loads(json_data), login_req)
-    encoded_result = login_req.SerializeToString()
 
-    # AES-CBC encrypt
-    payload = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, encoded_result)
+@app.route('/like', methods=['GET'])
+def handle_requests():
+    key = request.args.get('key')
+    if key != API_KEY:
+        return jsonify(WRONG_KEY_RESPONSE), 401
 
-    # MajorLogin
-    url = "https://loginbp.ggblueshark.com/MajorLogin"
-    headers = {
-        "User-Agent": USERAGENT,
-        "Connection": "Keep-Alive",
-        "Accept-Encoding": "gzip",
-        "Content-Type": "application/octet-stream",
-        "Expect": "100-continue",
-        "X-Unity-Version": "2018.4.11f1",
-        "X-GA": "v1 1",
-        "ReleaseVersion": RELEASEVERSION,
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, data=payload, headers=headers, timeout=20) as resp:
-            response_content = await resp.read()
-            # Decode protobuf response
-            login_res = freefire_pb2.LoginRes()
-            login_res.ParseFromString(response_content)
-            msg_json = json_format.MessageToJson(login_res)
-            msg_dict = json.loads(msg_json)
+    uid_param = request.args.get("uid")
+    server_name_param = request.args.get("server_name", "BD").upper()
 
-            token = msg_dict.get("token", "0")
-            region = msg_dict.get("lockRegion", "0")
-            server_url = msg_dict.get("serverUrl", "0")
+    if not uid_param:
+        return jsonify({"error": "UID is required", "credits": "@HAFSAN_KUN"}), 400
 
-            if token == "0":
-                raise ValueError("Failed to obtain JWT")
+    all_tokens = load_all_tokens()
+    if not all_tokens:
+        return jsonify({
+            "error": "No tokens loaded from token_bd_1.json or token_bd_2.json",
+            "credits": "@HAFSAN_KUN"
+        }), 500
 
-            return token, region, server_url
+    with state_lock:
+        state = load_state()
+        usage = state["usage"]
 
+    profile_token = get_next_profile_token(all_tokens, state)
+    if not profile_token:
+        return jsonify({"error": "No token for profile check."}), 500
 
-# ════════════════════════════════════════════════════════════════════════════
-#  LIKE PAYLOAD (encrypted LikeProfile)
-# ════════════════════════════════════════════════════════════════════════════
+    enc_uid = enc_profile_check_payload(uid_param)
+    before_info = make_profile_check_request(enc_uid, server_name_param, profile_token)
+    before_likes = int(before_info.AccountInfo.Likes) if (before_info and hasattr(before_info, 'AccountInfo')) else 0
+    print(f"UID {uid_param}: before = {before_likes}")
 
-def create_like_payload(target_uid: int, region: str) -> bytes:
-    """Build and encrypt the protobuf payload for /LikeProfile request."""
-    msg = send_like_pb2.like()
-    msg.uid = int(target_uid)
-    msg.region = region
-    protobuf_bytes = msg.SerializeToString()
-    encrypted = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, protobuf_bytes)
-    return encrypted
+    with state_lock:
+        state = load_state()
+        selected = select_tokens_for_likes(all_tokens, LIKES_PER_USER_REQUEST, state)
 
+    if not selected:
+        return jsonify({
+            "LikesGivenByAPI": 0,
+            "LikesafterCommand": before_likes,
+            "LikesbeforeCommand": before_likes,
+            "PlayerNickname": "N/A",
+            "UID": int(uid_param),
+            "status": 2,
+            "message": "All tokens reached daily limit. Try again tomorrow (UTC).",
+            "credits": "@HAFSAN_KUN"
+        })
 
-# ════════════════════════════════════════════════════════════════════════════
-#  ACCOUNT INFO (GetPlayerPersonalShow)
-# ════════════════════════════════════════════════════════════════════════════
+    like_proto = create_protobuf_message(uid_param, server_name_param)
+    enc_like_payload = encrypt_message(like_proto)
+    like_url = get_like_api_url(server_name_param)
 
-def get_base_url(region: str) -> str:
-    if region == "IND":
-        return "https://client.ind.freefiremobile.com"
-    elif region in {"BR", "US", "SAC", "NA"}:
-        return "https://client.us.freefiremobile.com"
-    else:
-        return "https://clientbp.ggblueshark.com"
+    async def send_all():
+        tasks = [
+            send_single_like_request(enc_like_payload, td, like_url)
+            for (_f, td, _u) in selected
+        ]
+        return await asyncio.gather(*tasks, return_exceptions=True)
 
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        results = loop.run_until_complete(send_all())
+    finally:
+        loop.close()
 
-async def get_account_info(target_uid: str, region: str, jwt_token: str):
-    """Get player info from Garena's GetPlayerPersonalShow endpoint."""
-    region_main = region.upper()
-    if region_main not in SUPPORTED_REGIONS:
-        return {"error": f"Unsupported region: {region}"}
+    success_count = 0
+    with state_lock:
+        state = load_state()
+        usage = state["usage"]
+        for (_f, td, _u), res in zip(selected, results):
+            if isinstance(res, int) and res == 200:
+                tok = td["token"]
+                usage[tok] = usage.get(tok, 0) + 1
+                success_count += 1
+        save_state(state)
 
-    # Build GetPlayerPersonalShow protobuf
-    json_data = json.dumps({"a": target_uid, "b": "0"})
-    req = core_pb2.GetPlayerPersonalShow()
-    json_format.ParseDict(json.loads(json_data), req)
-    encoded = req.SerializeToString()
-    payload = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, encoded)
+    after_info = make_profile_check_request(enc_uid, server_name_param, profile_token)
+    after_likes = int(after_info.AccountInfo.Likes) if (after_info and hasattr(after_info, 'AccountInfo')) else before_likes
+    nickname = "N/A"
+    actual_uid = int(uid_param)
+    if after_info and hasattr(after_info, 'AccountInfo'):
+        actual_uid = int(after_info.AccountInfo.UID)
+        if after_info.AccountInfo.PlayerNickname:
+            nickname = str(after_info.AccountInfo.PlayerNickname)
 
-    # Get server URL from JWT (we need to call create_jwt again or pass it)
-    # For simplicity, use the base URL
-    base_url = get_base_url(region_main)
-    url = f"{base_url}/GetPlayerPersonalShow"
+    increment = after_likes - before_likes
+    status = 1 if increment > 0 else 2
 
-    headers = {
-        "User-Agent": USERAGENT,
-        "Connection": "Keep-Alive",
-        "Accept-Encoding": "gzip",
-        "Content-Type": "application/octet-stream",
-        "Expect": "100-continue",
-        "Authorization": f"Bearer {jwt_token}",
-        "X-Unity-Version": "2018.4.11f1",
-        "X-GA": "v1 1",
-        "ReleaseVersion": RELEASEVERSION,
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, data=payload, headers=headers, timeout=20) as resp:
-            content = await resp.read()
-            try:
-                info = account_show_pb2.AccountPersonalShowInfo()
-                info.ParseFromString(content)
-                msg_json = json_format.MessageToJson(info)
-                return json.loads(msg_json)
-            except Exception:
-                return {"error": f"HTTP {resp.status}", "raw": content.decode("utf-8", errors="ignore")[:200]}
+    with state_lock:
+        state = load_state()
+        usage = state["usage"]
+    total_used = sum(usage.values())
+    total_cap = len(all_tokens) * LIKES_PER_TOKEN_PER_DAY
 
-
-# ════════════════════════════════════════════════════════════════════════════
-#  LIKE SENDING
-# ════════════════════════════════════════════════════════════════════════════
-
-async def send_like_with_guest(guest: dict, target_uid: str, region: str, semaphore):
-    """Send a single like using one guest account."""
-    guest_uid = str(guest["uid"])
-    guest_pass = guest["password"]
-
-    async with semaphore:
-        try:
-            # Generate JWT for this guest
-            jwt_token, lock_region, server_url = await create_jwt(guest_uid, guest_pass)
-
-            # Build like payload
-            payload = create_like_payload(int(target_uid), region)
-
-            # Determine LikeProfile URL
-            base_url = get_base_url(region)
-            url = f"{base_url}/LikeProfile"
-
-            headers = {
-                "User-Agent": USERAGENT,
-                "Connection": "Keep-Alive",
-                "Accept-Encoding": "gzip",
-                "Content-Type": "application/octet-stream",
-                "Expect": "100-continue",
-                "Authorization": f"Bearer {jwt_token}",
-                "X-Unity-Version": "2018.4.11f1",
-                "X-GA": "v1 1",
-                "ReleaseVersion": RELEASEVERSION,
-            }
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, data=payload, headers=headers, timeout=30) as resp:
-                    if resp.status == 200:
-                        return True, guest_uid
-                    else:
-                        return False, guest_uid
-
-        except Exception as e:
-            app.logger.error(f"Like error for guest {guest_uid}: {e}")
-            return False, guest_uid
+    return jsonify({
+        "LikesGivenByAPI": increment,
+        "LikesafterCommand": after_likes,
+        "LikesbeforeCommand": before_likes,
+        "PlayerNickname": nickname,
+        "UID": actual_uid,
+        "status": status,
+        "TokensUsedThisRequest": len(selected),
+        "SuccessfulSends": success_count,
+        "DailyUsage": {
+            "used": total_used,
+            "capacity": total_cap,
+            "remaining": total_cap - total_used
+        },
+        "credits": "@HAFSAN_KUN"
+    })
 
 
-async def send_likes_batch(target_uid: str, region: str, accounts: list, max_likes: int = 300):
-    """Send likes using multiple guest accounts concurrently."""
-    semaphore = asyncio.Semaphore(50)
-    tasks = []
-    for guest in accounts[:max_likes]:
-        tasks.append(send_like_with_guest(guest, target_uid, region, semaphore))
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    success = sum(1 for r in results if isinstance(r, tuple) and r[0] is True)
-    return success, len(results)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  API ENDPOINTS
-# ════════════════════════════════════════════════════════════════════════════
-
-@app.route("/health", methods=["GET"])
+@app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "ok", "service": "ff-likes-api"})
 
 
-@app.route("/remain", methods=["GET"])
+@app.route('/remain', methods=['GET'])
 def remain_info():
-    global used_count
-    remaining = max(daily_limit - used_count, 0)
+    key = request.args.get('key')
+    if key != API_KEY:
+        return jsonify(WRONG_KEY_RESPONSE), 401
+
+    with state_lock:
+        state = load_state()
+        usage = state["usage"]
+
+    all_tokens = load_all_tokens()
+    total_used = sum(usage.values())
+    total_cap = len(all_tokens) * LIKES_PER_TOKEN_PER_DAY
+
     return jsonify({
-        "daily_limit": daily_limit,
-        "remaining": remaining,
-        "used": used_count,
-        "reset_info": "4:00 AM IST",
+        "daily_limit": total_cap,
+        "remaining": max(total_cap - total_used, 0),
+        "used": total_used,
+        "reset_info": "4:00 AM UTC"
     })
 
 
-@app.route("/like", methods=["GET"])
-def handle_requests():
-    global used_count
+@app.route('/token_info', methods=['GET'])
+def token_info():
+    key = request.args.get('key')
+    if key != API_KEY:
+        return jsonify(WRONG_KEY_RESPONSE), 401
 
-    # API key check
-    api_key = request.args.get("key")
-    if api_key not in VALID_API_KEYS:
-        return jsonify({"error": "Invalid or missing API key", "status": 3}), 401
+    all_tokens = load_all_tokens()
+    with state_lock:
+        state = load_state()
+        usage = state["usage"]
 
-    uid = request.args.get("uid")
-    region = request.args.get("region", "").upper()
-    if not uid or not region:
-        return jsonify({"error": "UID and region are required"}), 400
+    file_stats = {}
+    for fname in TOKEN_FILES:
+        tokens = [t for (f, t) in all_tokens if f == fname]
+        used = sum(usage.get(t["token"], 0) for t in tokens)
+        cap = len(tokens) * LIKES_PER_TOKEN_PER_DAY
+        file_stats[fname] = {
+            "token_count": len(tokens),
+            "used_today": used,
+            "capacity_today": cap,
+            "remaining_today": cap - used
+        }
 
-    if region not in SUPPORTED_REGIONS:
-        return jsonify({"error": f"Unsupported region. Use: {', '.join(SUPPORTED_REGIONS)}"}), 400
+    total_used = sum(usage.values())
+    total_cap = len(all_tokens) * LIKES_PER_TOKEN_PER_DAY
 
-    try:
-        def process_request():
-            global used_count
-
-            # Load accounts for this region
-            accounts = load_accounts(region)
-            if not accounts:
-                return jsonify({"error": f"No accounts available for {region}", "status": 4}), 503
-
-            # Get account info (before likes)
-            # We need a JWT first to call GetPlayerPersonalShow
-            # Use the first account to get a JWT for info lookup
-            info_jwt = None
-            info_region = region
-            for acc in accounts[:5]:
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    token, lock_region, server_url = loop.run_until_complete(
-                        create_jwt(acc["uid"], acc["password"])
-                    )
-                    loop.close()
-                    if token:
-                        info_jwt = token
-                        info_region = lock_region or region
-                        break
-                except Exception:
-                    continue
-
-            if not info_jwt:
-                return jsonify({"error": "Failed to generate JWT for account info", "status": 4}), 503
-
-            # Get before likes
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            before_info = loop.run_until_complete(
-                get_account_info(uid, info_region, info_jwt)
-            )
-            loop.close()
-
-            if before_info.get("error"):
-                return jsonify({"error": before_info["error"], "status": 4}), 503
-
-            basic_info = before_info.get("basicInfo", {})
-            before_like = int(basic_info.get("liked", 0))
-            player_nickname = basic_info.get("nickname", "Unknown")
-            player_level = basic_info.get("level", 0)
-
-            # Send likes
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            success_count, total_attempted = loop.run_until_complete(
-                send_likes_batch(uid, region, accounts, max_likes=300)
-            )
-            loop.close()
-
-            # Get after likes
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            after_info = loop.run_until_complete(
-                get_account_info(uid, info_region, info_jwt)
-            )
-            loop.close()
-
-            after_like = 0
-            if not after_info.get("error"):
-                after_basic = after_info.get("basicInfo", {})
-                after_like = int(after_basic.get("liked", 0))
-
-            like_given = after_like - before_like
-            if like_given < 0:
-                like_given = 0
-
-            status = 1 if like_given > 0 else 2
-
-            # Count usage
-            if status == 1:
-                used_count += 1
-
-            remaining = max(daily_limit - used_count, 0)
-
-            return jsonify(OrderedDict([
-                ("LikesGivenByAPI", like_given),
-                ("LikesafterCommand", after_like),
-                ("LikesbeforeCommand", before_like),
-                ("PlayerNickname", player_nickname),
-                ("Level", player_level),
-                ("Region", region),
-                ("UID", int(uid)),
-                ("status", status),
-                ("daily_limit", daily_limit),
-                ("used", used_count),
-                ("remaining", remaining),
-            ])), 200
-
-        return process_request()
-
-    except Exception as e:
-        app.logger.error(f"Error: {e}")
-        return jsonify({"error": str(e), "status": 0}), 500
+    return jsonify({
+        "date_utc": state.get("date"),
+        "files": file_stats,
+        "total": {
+            "tokens": len(all_tokens),
+            "used_today": total_used,
+            "capacity_today": total_cap,
+            "remaining_today": total_cap - total_used
+        },
+        "config": {
+            "LIKES_PER_TOKEN_PER_DAY": LIKES_PER_TOKEN_PER_DAY,
+            "LIKES_PER_USER_REQUEST": LIKES_PER_USER_REQUEST
+        },
+        "credits": "@HAFSAN_KUN"
+    })
 
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)

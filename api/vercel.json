@@ -2,20 +2,25 @@
   "version": 2,
   "builds": [
     {
-      "src": "index.py",
-      "use": "@vercel/python"
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "includeFiles": [
+          "app.py",
+          "like_pb2.py",
+          "like_count_pb2.py",
+          "uid_generator_pb2.py",
+          "token_bd_1.json",
+          "token_bd_2.json"
+        ]
+      }
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "/index.py"
+      "dest": "api/index.py"
     }
-  ],
-  "functions": {
-    "index.py": {
-      "maxDuration": 60,
-      "memory": 1024
-    }
-  }
+  ]
 }
