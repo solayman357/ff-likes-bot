@@ -26,7 +26,7 @@ WRONG_KEY_RESPONSE = {
 
 TOKENS_PER_FILE = 111
 LIKES_PER_TOKEN_PER_DAY = 150
-LIKES_PER_USER_REQUEST = 111
+LIKES_PER_USER_REQUEST = 240
 TOKEN_FILES = ["token_bd_1.json", "token_bd_2.json"]
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
