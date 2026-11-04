@@ -477,6 +477,36 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await _respond(result)
 
+    # Forward successful like result to configured channel
+    if status == 1 and forward_channel_id:
+        try:
+            # Forward the success message to the configured channel
+            # We need to get the message ID of the sent result first
+            # Since _respond returns the message, we can forward it
+            # For now, we'll send a copy of the result to the forward channel
+            forward_text = (
+                f"✅ <b>LIKE SENT</b> ✅\n\n"
+                f"👤 <b>Player:</b> {player}\n"
+                f"🏷️ <b>UID:</b> {uid_resp}\n"
+                f"🌍 <b>Region:</b> {region_resp}\n"
+                f"⭐ <b>Level:</b> {level}\n\n"
+                f"❤️ <b>Likes given:</b> +{given}\n"
+                f"📊 <b>Total:</b> {before} → {after}\n\n"
+                f"📅 <b>Requested by:</b> <code>{user_id}</code>"
+            )
+            try:
+                if forward_channel_id:
+                    await context.bot.send_message(
+                        chat_id=forward_channel_id,
+                        text=forward_text,
+                        parse_mode='HTML'
+                    )
+            except Exception as e:
+                # Log error but don't fail the main operation
+                print(f"⚠️ Failed to forward like notification: {e}", flush=True)
+        except Exception as e:
+            print(f"⚠️ Error in forward logic: {e}", flush=True)
+
 # ============ JWT TOKEN UPLOAD HANDLER ============
 # Broadcast list file
 BROADCAST_FILE = "broadcast_list.json"
@@ -949,7 +979,7 @@ def main():
         # Ignore stickers silently - don't reply to stickers
         async def ignore_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
-        app.add_handler(MessageHandler(filters.Sticker, ignore_sticker))
+        app.add_handler(MessageHandler(filters.STICKER, ignore_sticker))
         app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
         app.add_error_handler(error_handler)
 
