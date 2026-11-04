@@ -3,6 +3,7 @@ import json
 import base64
 import sys
 import threading
+import time
 import requests
 import aiohttp
 import asyncio
@@ -665,6 +666,7 @@ def start_health_server():
 
 # ============ MAIN ============
 def main():
+    # Start health server first so Render can reach us even if polling is down
     try:
         start_health_server()
     except Exception as e:
@@ -674,16 +676,17 @@ def main():
         load_data()
     except Exception as e:
         print(f"❌ load_data failed: {e}")
-    
+
+    # Build the Telegram application
     try:
         request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
         app = Application.builder().token(BOT_TOKEN).request(request).build()
-        
+
         job_queue = app.job_queue
         if job_queue:
             job_queue.run_daily(reset_midnight, time=time(hour=0, minute=0, second=0), days=tuple(range(7)))
             print("⏰ Midnight reset scheduled")
-        
+
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_cmd))
         app.add_handler(CommandHandler("info", info_cmd))
@@ -703,15 +706,26 @@ def main():
         app.add_handler(CommandHandler("forcejoinstatus", forcejoinstatus))
         app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
         app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
-        
+
         print("🤖 Bot is running...")
         print("   → Normal users: only in groups, daily limit applies")
         print("   → Admin users: anywhere (DM + groups), unlimited likes")
-        app.run_polling()
+
+        # Polling loop with auto-restart on failure
+        while True:
+            try:
+                app.run_polling()
+            except Exception as e:
+                print(f"❌ Polling error: {e}")
+                print("🔄 Restarting polling in 5 seconds...")
+                time.sleep(5)
     except Exception as e:
-        print(f"❌ Bot crashed: {e}")
+        print(f"❌ Bot setup failed: {e}")
         import traceback
         traceback.print_exc()
+        # Keep process alive so health server can still respond
+        while True:
+            time.sleep(60)
 
 if __name__ == "__main__":
     main()
