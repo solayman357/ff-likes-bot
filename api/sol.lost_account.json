@@ -1,0 +1,1177 @@
+[
+    {
+        "uid": "7894004094",
+        "password": "8E8F01A2E7940050CD3A1FF9D352BE57D7EE5302B3EE87187DBF02B4B88B6C06",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8265092535",
+        "password": "DE5BF47787332B4F36832415613B5C8DB25BFBA22AC3FDF69AF9D69B43A348FC",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8246354524",
+        "password": "B77AD51E7CEBB371D18164671DD8ADF93A174B1B18F02167D3DF118490BE952C",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8050068329",
+        "password": "88BF8E3FC597CD658E840D9764EEC508661681DBF93244EB6491730570F6659B",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051285138",
+        "password": "CB2C5473576778A64D7C0ACC4E31DD6464E1BED68252D5CBACFE0269B8111F69",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051551376",
+        "password": "DFB364F74D28DFDA573FFD62F1E5DD4D24B4D84724F5BD3A9758FAC7918A5E00",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051939171",
+        "password": "D480D22EEDD742CD8AE271765795808368461904AE78D20AF81E710DD3871500",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8048569582",
+        "password": "C75D242D5F480C4571DDB3907BE31B9E1D89B041813634FE3D439B427DB383C2",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8028267568",
+        "password": "86C80812117328741BD2D58B65A2B933C642B33267154D05DA842CCBF3E17CD5",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8030222742",
+        "password": "1D516629955F5FAE58080EB98E5654CDF58C1C6FF6CD1E72474EFF3C9B2D23B0",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8025751307",
+        "password": "2B4400A416BD630F76C363200755B23B15ECBB2F25F9099D2A51259A4039A066",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8025759766",
+        "password": "62F85D0E986DB752599C8A65C8208A5480135A37F2FA7FBEF55064069756D3DE",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8030431018",
+        "password": "7E48428DF643E213D91B7FC0325245CF9AF69B2C3E56B119F76737B064F64299",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8246353030",
+        "password": "07701869F9D87DC806001E5A58435D8254CD7C6FA05EBAAEE15B744CD232380D",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051211342",
+        "password": "BD04BABEC19AFD115DBD07E6C7A2BDCB639260C385CE2887B5300933DFA6A4A7",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8054397827",
+        "password": "351E1012D1C3A403F09F9A33F4A916E7DEF51E2463F59D6440C61749DFA57D42",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8031412667",
+        "password": "8F62A6B2322EF38FAE57794D920D1C6DA938EF988F0DF388BED8BC6BC0FABF45",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8252986502",
+        "password": "935FF90DEEAC1D26A072EE78E6A81D18C20888BB7570CD7323C863FD7833DADA",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8050072292",
+        "password": "6BBCA4B914D7C0AE1D501E0844777F79AEF3136D1A6F84DD5007057FBE9EF267",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8049814284",
+        "password": "ABB854E006B092CB60927CAF08DA7147CA6821E1B1D37D4F4AC6D119A1A469AE",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8264966636",
+        "password": "CF4B9787171D21C6E2094DF3FD0BFB6F93CB92D6D35C0F6913ED639368D978B4",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7894004574",
+        "password": "65A56A3F53F8F3ABBFE39962F16F9D496D66223BC68B041919DEA48D6E67CAA5",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8030197223",
+        "password": "F05CBAF7849F1ADCAC08CAFCBAB888C82C43F2F2487410DE84962449B7726872",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051291921",
+        "password": "75CC5B67FE1182F736930547E7222E07D184933618D97552B2E8CE3EE2051752",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7895680995",
+        "password": "2CA2A3326F76CA9DEAA8F37B0B50492C0D1D405BC77814C3BC87DA1A1747EA18",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8028471429",
+        "password": "46FF5C94D0A0DF0E1FC8F589C258D20E99CBC3B0FAD9406C34CC43FD4CAD78E5",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8264966186",
+        "password": "C5C4721603B0CB8A797ADFEE7681FFEF1441173FAAF1B2416DB94657383FFA34",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8048569535",
+        "password": "96044192CFF2A8FBFA00A8A1A9D65C4EA3E5CB5957FC5935826FDFC29C85480C",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8049814656",
+        "password": "1095FAC3525C4543C6BB264090F82BCD281746F399AC3FCC25F6E05B0C2288EF",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8037099909",
+        "password": "B7F006DF73504BE536EA36752B3385E8FBE34F7471C08B2BC6F3E4DD69E6811A",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8025753648",
+        "password": "64A71130331CE1767D0812BBE09647DA1BA2FA309DE99B5C963C6AACD8BFB44D",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8050071563",
+        "password": "02BACEBA5704880180EA1CE24D21E74ABA7D1E289DC4AE174B4D7B2FB689FCD2",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8166276445",
+        "password": "F62FFA4563BACEAC74A6CF34166B4AD9D30EE2F9B5263A0A8BF44F55E9F03CE0",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7894004284",
+        "password": "6BE81E9045366E0493147AD033E8BDB4DDADD144D5C5087591BEF426252B6CCA",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8025264568",
+        "password": "76DA8703F6AA6A10CE5E2FAD1150B2F7DEC8DE64CC74333449C601D7BB1C86B1",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8054402744",
+        "password": "8D1791DFE4A4BC0D96B045D18625E8E77FACBB836A73D81F30266733C414BF28",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8025769007",
+        "password": "9FE92862AA5D7EB89C5DD3BFA08D48DD9CB2AC99E6415F87769106B43A464C89",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7895844669",
+        "password": "4DBAAF89610E401F7D2BB754B0F97587B7BEFD58039F6B3687E7287D3A584A2B",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8049291178",
+        "password": "441718A03667BC5EE70E73D839ECB63599B780C7AF782A92DCF14A02FF351A20",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8025769035",
+        "password": "84658EF429E71044222D1B473BFC15907FE4136E227D05F068723A084D3BBFD8",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8032882172",
+        "password": "389A6E38B1CAF17954B6A841DB282233A80356C7575BED38B8F10EEB0AFCF407",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7893866136",
+        "password": "690DE1815A567FF4775BFCEAB3860D5C97B21740B1786BDEDD394CD19B2D0E5E",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8030222910",
+        "password": "9311076F4023289CC3C426BD4F8DA8231B5A42BE5F7831E95E6A1994EB9330AB",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051939419",
+        "password": "39C74D08F45381F4BF1D972B20171B82A55508329150AEC11CB8AE6484A10FBB",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8261878489",
+        "password": "835240AD1A896BD175A9761AEABFE946071A2B412ECE31FF81374C01FF6DBAFC",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8260856891",
+        "password": "8438E0EA26A1E2D8C07EA7B602E8DFA3335A0340F25C4F5C058D4F0A06876CA2",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7895680718",
+        "password": "05D8215660711ED5B086156E4B5630FBAF6BD45FE4421C7B4A7B61EA29EEC957",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8265169867",
+        "password": "7D7DEAAA9F4C05B24E24A9A352B7F508A6F15B74664CE2E6D6F85E65256E05AE",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8031381659",
+        "password": "C3DA577B41DC7FA80D058DB452AA3F9018AEF75B4519ABCE5128FAE4F64793E7",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051321744",
+        "password": "76EDE528FA9469C7D95ADB674712CE385FA0B97826833995A7265FE52063A749",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8049814507",
+        "password": "19D65A195A9F660F40632C15878FA13FF685C70DA24DEA17A7F50649E6237894",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8264967224",
+        "password": "68DA8612833B7000B24C09350E8B59BDA25FE2D0A6265A9961FB93B8AAABAB18",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8037100550",
+        "password": "44AAA7A5688FBF7C7ADDFB40CDC233DC7C9254E72E7F2FAA47700E43526C793E",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8032316718",
+        "password": "E193B1A4EC1C1031E91605B452AE0F39C62264A173AD64C005211E257F1C2103",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8030964931",
+        "password": "B78629C3AF1908CCFB7B83B4635F56E3B15C3C90BB05E9A706CB70F85429BE3F",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8054400345",
+        "password": "2BF8B1D37B3A1FA8C4F090015D6A7178644BE48A74E6B1AADE782498BB88B7A7",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8054397600",
+        "password": "08CEEEB06D44AC53EB01562A726C2C5C0433AF91CCE357CDE37B77FD9C19CEF7",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8265183653",
+        "password": "BB2D6C13E5CFE9E2B1783967FF7E59E0BB7A49ED413ECC1877DDB5CF13C4A11B",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8031247379",
+        "password": "64126855A52E798F10514F56B3B59CE345351EB9AA4F79CDF7B47E405A2CB1E6",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8048630566",
+        "password": "2ED3D9A013213594D8C494E1375A416EC790AAA037BB9125139124FB85EF1035",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051285260",
+        "password": "29AF4215F311CE3019E2AA43E607ECF163DA6D9CC6811B31E4254C3F31666A41",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7893865582",
+        "password": "C34F659AF0DA1E0B951477F04D70956E934018476CAC0B20051C401860A6F36B",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8025762307",
+        "password": "EA1B145E05C720B84E5EFAB2C0FB166D84D74AB1B19ECD146233C5E625FD0F91",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8261882991",
+        "password": "C7A2CB5EB87871A7F59E0921E77BFC450617B9B2E4D52A3A2F30D403D3AF0519",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8050310565",
+        "password": "302DB2D64DEB8FC25EE7AD431E7E25B3F40BE61DEA7245070F3BC1E540BADB90",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051552253",
+        "password": "4FEAB33E2DE93D1813A128366DBF280EB3AA1D5733E85C77EBA84A020D0F06FE",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8032316957",
+        "password": "4D63F55754884FDE3EE6D55E71E9A5A404ABDA4508E34B1B3FD8A3967AEDE7A2",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8259907285",
+        "password": "271A42CB29DA724A936E44C946D8E026A269500D251801119A34B7B2A4349C65",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8031249024",
+        "password": "492190B6B299FAADDC65B9C2573D72C08688F0878FB5FA489D8FF0FAF5874039",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8031247330",
+        "password": "01DF58855C5BE900D4E548561567CBE8779BE61D1CEC14679D71BEF646736E8B",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8048287705",
+        "password": "98CEB7883A8E4F5ACD8CF3891C3381328AB2DF44E86A07B31537D252DDE51196",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8031381300",
+        "password": "18C182027FDF222A92F39F7048F78655776EA3DE7EAEED8F12DE0ED5388E299E",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8022932126",
+        "password": "C3E137FD8194D65B5D83FD5BF0488BAB8090D5C0373B0AADF5BCBEEFC98136AB",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7894978430",
+        "password": "3837D67F9AF1DC2FECCFC2366C1B4BA59C629C736C9154087A7C04D27990CE45",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8253427275",
+        "password": "5816E9A2A6487B7960712CEAA804079FDDF12A4040903CBDF6DA7341E1300156",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8024540314",
+        "password": "AA487EE818E5DB3547FEE4932F5EFF779AD5432A4DA2B6C848A88E17FFEDDE3E",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051215364",
+        "password": "80EB783193521AD534D2AC1780AAB9C2B01C4CC6B9B11FA3B18C325E0992D6CA",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051289243",
+        "password": "21E070928C8B042C3B26DDEF9F14898BB5A09974290E7341997BE3CFA3622B60",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051215190",
+        "password": "914AFAE38364454F544685E10508EBBD2DD3664E6EEA1A05E43FED825BF91209",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8054402677",
+        "password": "57BCF23E1CA4E7681E9871399318FE7BA1FF34525DB92D1C2131BCE07F7BC6C9",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7896067562",
+        "password": "35D3F8B445F57368EFF88DDC7E58CD466E2C774199789E6FC04A83D3953A6615",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8024540186",
+        "password": "3F198C55366C5AF982BC28C46EBC6FB72EA60AEB00D7C5524A31D03996DBED08",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051298618",
+        "password": "758E5876BE976F8CE38E9149481F1DEBFFFE7907B3048430B70BC955F9482340",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051289022",
+        "password": "820195B7416651228D69017770E6C53B7C9B62BE4856A986CA4806DE682F939E",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8255866262",
+        "password": "BA1DE3CC25F03423D14171C7AB8ABD2CE7F768997CC6644B0D5ABEB581ACAA8A",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8048287567",
+        "password": "07BCF96674C9977973327F0F74D453B8DFA71D7F1FEC62B5393910C61AD58FD9",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8253426767",
+        "password": "DEC9BEF6C9F93938044FBE0CDFB098ED5D73685A661916BD7F64DDEB765F35A1",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8264918748",
+        "password": "0974C8D7C1A3AFE87DD8BD8AAA55B31C72411BB9C2747199C6EF23984CA8D480",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7895851677",
+        "password": "DA8F0F356EBB259F6E21C6E9087D7B8DE88526C66C1F6D59713F09536ACE6B56",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051939747",
+        "password": "DF19499AC09FE850F7CE7C98D0B4265B2C7F273870850D610AC68325341ADE03",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8259908644",
+        "password": "8662AEBDCC4B526D5BEC0433679F85E7241634B6AA147DADFCFC3DC4B5F6CE4B",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8028267313",
+        "password": "37D8EAFE1E3B0769F7E56982AD8395323FC516C8FA09E69B27365B75B5CD7FDC",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8265168823",
+        "password": "C57209A30A432FE30ACF965D8BE21DF6070AADA0C3F1C17CB1E4B037029FF6A9",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8050310226",
+        "password": "F92A919A344284512EB19F99B9EEDB2F2C8955CF8230A9B9C270A26B8F1DD74B",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7024435370",
+        "password": "B3230D50386B8CCDD0AE74D837CEE902B12B9FC12F16D9701332C61742DAA5D9",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8024444734",
+        "password": "BEB25DF23909D2FCD800818F76A415E2B60B3C4B2913E23B5C4FF5D04A431F9F",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8029841918",
+        "password": "8C65A34293A67853A97D1412019A790E86EF63B2E8994B914244D9ADC3622121",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8049291218",
+        "password": "503C0866D5A882EF8C081B52B1E2CA6472EE470F6F389F83E48DC47D0E7DE27B",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8265169499",
+        "password": "7009E370FDB7DAF1C2769CAD77DBEB4DDE38A2E48037804D8D4683DD545BC8F2",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8048569440",
+        "password": "554AE6A9DDDE69729300B2768F32280F240F163031C28410EDFF8335F6B9C41E",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7707751834",
+        "password": "C7EA85E84674E4A39F2E798DD331567F231486077E014A8AC94D9DE0837A8471",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8265091916",
+        "password": "4BEBA30823F4DB7FF5C1FBF60A8693871B2A4A24245388C54CF35F266769574B",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8025264284",
+        "password": "55EBC4FC1D0F05C5D1573FE295329A09C941422844FBF02780DFF071CA71848A",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7890264891",
+        "password": "67050D8CE74F5D4ADE50784C28D1B7ED56C882F38E9EAEF67363D05917FA950F",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8024443822",
+        "password": "9F97DDE5EF87F4857E10CEC9BB9BE4FEDFCF783C95EF253417C4A6BB43B1C5AA",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8051321643",
+        "password": "B50B932731378175562DB9C52B6610E0E20EE927AB6C7E6D6DBD618C41DBAF48",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "6989686762",
+        "password": "43C24B031B1F8EF3FDB5A9930733DFC295B01354512E4E791545E5A9CAFE5D3D",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8255866663",
+        "password": "89978D173DBC18276D8DBD36CF640F412931BD11D6052045BE4659925D998373",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7024434020",
+        "password": "7B82F666267ADF2EB25067E7D92E451069537808D4E3D6BDC44C7026EC6AC83C",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7563528347",
+        "password": "8E405244F380BEADD1F6D7B13F962A6EBECD757858E7BF12D67092D60667272C",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8259896748",
+        "password": "D5348199443F7E82B67BFD5915E019883E87C7B8C9BD242A4C21D591E8A480F6",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7704153930",
+        "password": "71472DB875B5BCBDE7EDDEA83961A2ECFF8B8C2F238CD84B206A5DD09D8517A5",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8030434581",
+        "password": "5A3EA469C417ADD7CC38484CF1C48D1905E477F94F7EB489DF2F8659257238C4",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7573307692",
+        "password": "38F6EAB357142361190F2F88BCE5D0DC614032DB74542A38F34CD1D7FED4EC69",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7893865718",
+        "password": "9CA1ED3965E7EBE744DCD6A93AB3ED84209809B9AEB0694007CD984373B69C2E",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7666647354",
+        "password": "302299D140098D9566CB31A5FFA8E04D9720C7FABEDE0BEB16BBE56B34379ABD",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7478734796",
+        "password": "BD94D631C94D61D6DF6A943FABD42B3FB07DA6474AF5B24765A8AE0BB5C79341",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7871810673",
+        "password": "4A2FC17AAC341BF03DE845A19B4BF49FEB82ACC400D5288464F922D23761541C",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7563522992",
+        "password": "B8EF0D050ACBB833985DF378973EFA173ED0F7A1F2648F8643B668FB70B9CF7A",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7685849443",
+        "password": "57BEF4DEFFACBC4925A806BD3A28A6F4596807DFBA1D1B42F9107B924F599054",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8048630983",
+        "password": "A907A1EBBC0A5CC69C48B84E3D7B9BFBCDA4F140FA09FB511B2F12782C45D935",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7704164945",
+        "password": "A6520051E8F34F0E283845DA78D00F70BBD04848F66AD66373E4E295FEFF8B96",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8259908310",
+        "password": "15A243064876F2A2D016DE22B919077AF268123B5DEA3BCF7134BBD42A31A50D",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7884046121",
+        "password": "7A49A8F07570EC9A9D506F533245670BA5B704F10483D5972CA2F6CC3D4CDDAE",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8030964643",
+        "password": "FFBCEDAE4AE3CFFF6F29C6A6D975B5AD0D6FC2EF753B9AC8DDBB632E1AE2AC45",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8049291109",
+        "password": "1E56FDE615D46E6793706B0DCB7569C90E5A1A9057944334A5B47991CCEB51DD",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8054400406",
+        "password": "18A17E0369CC558C41F33F885D72F6A002DAA1AA56A37ACE8CC97E7F6B675618",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7563360903",
+        "password": "67A3094F372CC11A13C121A46D5B686ECF899708CACE493AC3C84661410838AB",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8050068170",
+        "password": "D292D1D95E5CE78DB501B72A4DC106FB1134BC531029761AC1D5162E770E62C3",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7238527809",
+        "password": "FD073285A4D23CD8E6CA19C448DD6B927D807E7D2D47F5BBD79108ABABDFF8C5",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8050071486",
+        "password": "79B2D4E3E417DB1C2AEEF6A9ABD7A2F2C35209302C62851175D59EC222E01FC7",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7489783589",
+        "password": "5D1D4A4A800857E6B446C1524ADD19149A0835A033557FAF5A19C7F9552E1001",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7884043504",
+        "password": "59EC873738A1EF5182A48F337E28C0BC8AA4FB41611D10BD122CFAC1C4047A94",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8030430504",
+        "password": "58C8A50268DE4B2271C0CD078AF93393723E1F3758F2E2972AB07D4D4D254A3C",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8049966821",
+        "password": "4ECF190D46A7CD74709C85E97802656C0203378F505BF791EE5850D929E292A5",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8261879349",
+        "password": "5ABF00F8665694BFD3F2D1EBA73EDF122D8871B0FE9518953EB9192B46021946",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7663881062",
+        "password": "F83DD1D865D1CE29E3DFB07C63AEBBA5B00220CF1DEB553C3FC2497305FBF97D",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7674432760",
+        "password": "7BEB6A40B7A57CDC1CF1390DB32AF661DDD890BC5D0CE0FCF5104DDD2D0B0DFE",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7572581509",
+        "password": "A79404FF9A315014FB647933C88EAC64AA7BD660F67A3610D69DF8BF38D1F354",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8025759829",
+        "password": "0B5AD95BE9EF707D45EADAFCB930322D9D1B55EDC4D0EF001E24FCF9110071BD",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8050068760",
+        "password": "CD6E3E547FB2B68E5A4FF3003EDD2FF19320F6975AF294AB58A07F6116845929",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7572942789",
+        "password": "7E36266F930F7D4F35EDCB90A902053AB9CA63B6AB127BAA525DDAD9C2DF4E40",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7862065560",
+        "password": "633AB99BC868C7062FACA5911B6567481328DE81BE5C5CACCD0CB309500F9148",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8049966661",
+        "password": "A1FE4D9A761462B877E57E45350AAF71A26100F6AADE6DAEA9EDF0E54F7A174F",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8050430191",
+        "password": "1BC36F27F36B66A92FAC87674F49A9FE8C1AA025154D80FA92E38F257EA6B9E8",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7681148231",
+        "password": "7D1010FEC878EAB6280DD8462DC2EC5D171E41F47BD37007BCF22DD157F26F94",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7408156059",
+        "password": "46E18BB5E43F17C5633E826A806C75558125FB97A06DAF213C7547A4F3633A9D",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8166275398",
+        "password": "3CF98F099187441542ED25BF598C2F388C1DA93D73A9221FBDE51F6942C57BD4",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "6989603465",
+        "password": "8C2D9A1205A9DF864A66CBAF04D1DAA39848A96CD4D09EC48627086550CBC79D",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7871513977",
+        "password": "73B865230D831A83EEF3382C40BD801AA82EFF6850E5ED6701E369B95D4FB4E8",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8050300272",
+        "password": "FEDD39F6F3CD9CFE57AA67CC35E676DE347D76ACB927AF06F498AFBE41609D3C",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7895680604",
+        "password": "117E2849C69E6FA0BD4C616621818C8CEECBE85C7510555301979AA9A2A94E5B",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8024443427",
+        "password": "A1848B762ADA73D2E903F91F90103E36DCF9777403BFD1A5A7B99865281DD2A4",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8029219094",
+        "password": "AA5B5B9713A01E56977AE0D74E08E3CD4D768FFC80F7124C01623CD13038C120",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7573264429",
+        "password": "86DF0B46B85098AAF38336715998C98E984B39CBB613E4E407EEA862C8B1EC4E",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7681239257",
+        "password": "0BBD1BDD97D2969D3D81BB397880BEA6DE07036B2D1C0977EEA4DD76A08427D5",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8030222800",
+        "password": "D6751429CF8C4BF5C97CFBBE7CAAFD81DAD7697BCA0DB448D8FD2BE56C474A76",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8030197024",
+        "password": "3AF3375272F0E559BB32A6E1A61639B17E7909D0789F3E5E585C26116EB9B98E",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7643464280",
+        "password": "762A0338AF02716B94994D649ED95F14BBC896EA422F812493D7E72F87ADF3CA",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7699940897",
+        "password": "3839DD797FD7D6C4FA0B8F48FA1D82CFA6A70DEB1F041EFF53DCCA1804E83560",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8025753478",
+        "password": "66E487C8E3B370141FCA8859ADB71532FF53A226E0D9A5B2B8EFBD05BFB5A408",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8051298643",
+        "password": "44D4E6F6A7F12C7F92D05F737B7E6EAFB884E94F961000FB6BB0CDA62E6444A3",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8030434798",
+        "password": "42180716238C6F6E1052478A5BC4C87433BD71D091FB07B38EA2B257C4CB0460",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8048351588",
+        "password": "18FB5E1B8A73216337BF642CD6C51AC8B481DD0E74B141D52EE13D07FA1D27DF",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7053073711",
+        "password": "954EBA43B44E1037CB411930254F84F8469EDC5655E3B3B766B0F50C00BCC0D9",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7663213672",
+        "password": "8BB5A7DC5E29FDC5E6B9BB5392739B7A4581129B3CE93DD2455FBBFCA7D814E8",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7490328236",
+        "password": "178A15A8D9499C0357A38EFAD9E05A6CE00F738C220B97DB79FF1A3B9682BC25",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8048631064",
+        "password": "B249616132E3B3ADB87548E06D6FC10DB7EA2B5CB896E58378E4D4D4BE77836B",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8050068066",
+        "password": "C30814E15F73511AC2FFAD1450EB0EC1FC90E9A06DDE995AD1BF262F6C8109B9",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7643462473",
+        "password": "23BA27EE5AE2D409FD0D856E1D2A58BE06F509257B162C051752E1447CC04D0A",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7269022924",
+        "password": "78A8D54CB0D81B888CC33B8DAE963E9989B5AF2A64BCB262A02E3B5203F61A09",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8025265278",
+        "password": "435BFEFF85C23C99A26E9ED9A1FE111BF2FFA0C1BE697BAF53C77F2EC1C93E1C",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8264921962",
+        "password": "FCCA7257EEF4A8A385C5412E4609EBC0C2408168BFF4A0A12A7C78806EC4DCD1",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7895679272",
+        "password": "01EB722B32C06F57DFEFFCAA040F41E7A0831804606DCC2F11B654F1C6E6B25E",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7895673773",
+        "password": "B4301C02A7B9FF801C80A60C2031A971A338E1F565A19CA174B9E71BFFCA7A20",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7573274728",
+        "password": "33157252D0C08C278B3453E8E67D72BFB577E97C5B238605EA757703F4715793",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7674440483",
+        "password": "20A2579CDC51C03732688E0716D8E1F41C48BA64D09435F75D720EE4119C1A73",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "6989570928",
+        "password": "C5CBA4FDFA5B10096E619EBB1CFE71E402BCD8CE554602EA46E97BB68B249CFA",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7572941543",
+        "password": "ACD904523A0F5269FA5F24EA4811E31968C3507080850B0BC4DDEEB10087A6F1",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7668215885",
+        "password": "0C160897BE75269B59F733929D68B67FBAC9A6EF93AA04EFF2A77B5ABEE134B4",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7862067398",
+        "password": "CC890D138BAFBD1BD71D0612E7E5C8A4B11B4A03AD62CF04386A18D0F7890125",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7666648112",
+        "password": "76ECE19629BEF912CD7138EAB116D9F5B3136AF6F86E0FA4B77F11276E71D415",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7681161591",
+        "password": "8D92A32A8CDB26A3D3500DE5079F732AC2B47C9F319FAD3FB3E609A5C7E42D1C",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7703480183",
+        "password": "0A7C8B292CF39A9458F6D068A4D88F6266AB3B8AA6B1BE747B25A53DF196668C",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7689335060",
+        "password": "930F9C5363CA4AB7F3BDDB16D8467B1AD9398B82D3D8C379EBCD1E7733D5E119",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8050309968",
+        "password": "ECDA651458B62BB20A977C25157D84937190C82C76BD588412F79A440266E606",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7862066674",
+        "password": "EBEA710E2E30043DE4BAF6B0B40F1EE8A47E41384A0D6B3EC7F7332392847BE5",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8048688337",
+        "password": "E33AAC862830643C85D604635F5F4C50D0D0FED5912BE11E6420A579C1C39409",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8030980123",
+        "password": "29EBA415B6FEC9495A328A75B58868A3D2FB4E54947752ADC168FC505558D804",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7884051873",
+        "password": "807A0D5B4CC8584D3EEFC32093D12413949B84D91A1B3D5D0E269B4D68B32EAD",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7681176578",
+        "password": "351FE9034C07F58410D7E16844D5C23ADEF9B17E908AC617FC5C83499C8EE9A2",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7950356004",
+        "password": "260F9BCB23191A34966118EEE30E4E1CE5203FFD0F5C0ACB98D6CCE60AC8690E",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7559887621",
+        "password": "42AAE020CC7225F29C2E80C44C988112C3B517F3E488D479BB604F7A612B77B9",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8030438923",
+        "password": "1FCCC73DFDCE0CF2851A57C780A3DD78B145AE1A3E830F1E11C0249F193362BE",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7681203241",
+        "password": "3CCB522C468966BB854B6EF330CA2BB0447D066EB19F17643E9560081EF2205B",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7572582749",
+        "password": "EE09293700C6D3112D26C7F0CECFFCC52F71BA08EFF5B36332F5FC779E019509",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7663843009",
+        "password": "1043B9178A098C4CEA28EF562085A6F10EA2DACE2B8387BFEDC473F319EB72DC",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7869721260",
+        "password": "EB5C66697B2D00D4FEB02EA1AF4FCB922D38684EE1203C0CE9A9B5484C73107D",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7871514211",
+        "password": "11805DB6306E695F7B274E3D5EADE3BBBCADFDE8972BC8A67B6457C863829B9C",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7478732182",
+        "password": "E0CB636898D874691EE186930C590C958ECF0BD324A5B726E6D8A4D4B0D64465",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8048687787",
+        "password": "7E6CABB2F00E11A2453C4CE3DDA7F2D81D593DAA35D3A5EA9A34B4F6765E42D0",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7872094315",
+        "password": "A4304300510D1216DD3F9754604C2AD96CF7E4A84F0B7B4A1A179AD12452EF9F",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7681191034",
+        "password": "1D571D4A086CE735D01298D536F8B08449114CCDAD551AC0DF0682D9C6F4AFB3",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7869677364",
+        "password": "A9271FD24880A875EED66F72BD5A696A14EE9C064D845A2D27D001FB7A59DDD4",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8024540057",
+        "password": "01F799B4B0BD598AFD900521832BB99731082EB2FE14AA61F6165385CF802121",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7563358132",
+        "password": "846E78B7BEF86958FCAB64AE594B23E62D878A333DC4736A6F6F2618305D9D35",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7871286828",
+        "password": "7110BB3DF9C0D449BA80C27171E21129043552BCEB7E849B0732FB529D9485A9",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7652259422",
+        "password": "46B4A39AAB4C90E42F1A3813CBC7CD7D4FFF9CEDF405EA75FD33A92070F9E5F2",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7269022824",
+        "password": "92D52D72739135952C65D8ED90B7A3B169744564B8A8BCF9C4BF7E7273E78974",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8051210832",
+        "password": "0911654F2ABAD9A32BA8B377598B9AF9A61F4D6D39257FBBE5E1265B4FE782DA",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7671905618",
+        "password": "035E140F584D36EBE4FE1510BDCDA8CDF276C401E76CDF706CB4552CF6538634",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7643427778",
+        "password": "D79498512486CF4AA3ABC8C76C37345095DBB2FC115249AB92818DDFBA64D6E0",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7674306875",
+        "password": "F6ACC2F3403FF9F8C0D0FBCA9CA6B7C383D8CC4D00D08C65F600D9E2DECC9A74",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7631131434",
+        "password": "DE2A6DCA680055E67AB1FE77BA53BFA968055B4060038FCEB659FC0C4553AA02",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7489782462",
+        "password": "1B528B56F2C6EF119DB9866889ED2AEF19D888254C36524593BF03AC9C488FD9",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7408152472",
+        "password": "8E8827E4DCBACF3B632646A049C6AB2CB66D888465E02AEBB958AF0E4B7EE022",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7872332152",
+        "password": "FA4F9ACEF7691AB51CEB7D37129812DF84393E435822F1BA9C98047872009C2A",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7894978035",
+        "password": "9A86801131219221F81A6A2FC8005FBB8C05D3E2BEDC32596AF50285370CA9E4",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7681175599",
+        "password": "0700FE6E9C236BF40746A4FC963D2918D473CEDC1486E0A12F7BD9A28670206E",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8265089800",
+        "password": "8DDF071607A1B6B16F54079BD697181C3AD462DFD245A3612B59A4A77B1954FF",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7666575368",
+        "password": "D5566A5B912BF44420A5ABE2D6582AB4F29B0A404DD0B2155A68ED18970BD2C5",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7663213967",
+        "password": "33B7C0D8339E51ED96F7571C2BE9A7EA3FF34977307B9721BBAD1D93787210B3",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8048258126",
+        "password": "3930663DD208F47F5354A5CF8C94F17D929C14C04E39CA23467EF12CE24E9DF4",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8050299480",
+        "password": "631536FF1BD605F089EE415B2214349A82591EB5CBEF85F16DCD6CD8015DD2DD",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7895851152",
+        "password": "02589E4C31545D563E40DE089FB5D381FB933904F84784FB4E68B4B119952685",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8025769098",
+        "password": "DB187CE98E4A48543724395318136BE04FEFDA68ED5D42EB14368343B8C310AC",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "7872357672",
+        "password": "237479B5759487E11364C89C316CDE637EDC5E407C7723EE86D2F8BE9876BBD7",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7674428270",
+        "password": "BB047C3F994685482EBBE3324ECD99CFDE03A9C5A131CA3B6EB8EF724F36C492",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7681171056",
+        "password": "22F80ACCB465B1A6632E7DCCCA57B17EADDEE99221DA2F0ADC24306EFD0406E4",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8032317316",
+        "password": "524C7EEE51E94797241FC63248AF838CF48B58AB11C2AD16F0E4ED5B4336CB9C",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7872337921",
+        "password": "22E48CBC9A0AD9E27B3F756FE5CA17C38978DF05F6200D792E88FEE388D70A51",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "7401204696",
+        "password": "5549879AB247E7A2704A7DA4459561A56EEEF86374F1E790D5E83BDABB973D36",
+        "error_reason": "API Error (500): Failed to generate token: Invalid UID or Password — access token not received"
+    },
+    {
+        "uid": "8025762478",
+        "password": "E8BFCC5F7411A9668A064824441EED420EE719652EF38077895861C76D9909F4",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8051298588",
+        "password": "82AF33AB34BD069D806A3A15BA1638703FBCB065D7D922214B4161484965E475",
+        "error_reason": "API OK but invalid response format or empty token"
+    },
+    {
+        "uid": "8028471735",
+        "password": "14A7A515B22FBCA9C754514A776D9A7162495493DADCF010378BAE52D723EC3C",
+        "error_reason": "API OK but invalid response format or empty token"
+    }
+]

@@ -12,6 +12,9 @@ import like_count_pb2
 import uid_generator_pb2
 import threading
 import urllib3
+import time
+import base64
+import urllib.parse
 from datetime import datetime, timezone
 
 # -------------------------------
@@ -28,6 +31,7 @@ TOKENS_PER_FILE = 111
 LIKES_PER_TOKEN_PER_DAY = 150
 LIKES_PER_USER_REQUEST = 300
 TOKEN_FILES = ["token_bd_1.json", "token_bd_2.json"]
+ACCOUNT_JSON_SOURCES = ["accounts20_part2.json", "sol.lost_account.json"]
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -79,6 +83,35 @@ def refresh_all_tokens():
                         pwd = parts[1].strip()
                         if uid and pwd and uid.isdigit():
                             accounts.append({"uid": uid, "password": pwd})
+
+    # Also load JSON account sources shipped in the repo
+    for jname in ACCOUNT_JSON_SOURCES:
+        if not os.path.exists(jname):
+            continue
+        try:
+            with open(jname, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"⚠️ {jname} read error: {e}")
+            continue
+        if isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                uid = str(item.get("uid", "")).strip()
+                pwd = str(item.get("password", "")).strip()
+                if uid and pwd and uid.isdigit():
+                    accounts.append({"uid": uid, "password": pwd})
+
+    # De-duplicate by uid+password
+    seen_acc = set()
+    unique_accounts = []
+    for a in accounts:
+        k = (a["uid"], a["password"])
+        if k not in seen_acc:
+            seen_acc.add(k)
+            unique_accounts.append(a)
+    accounts = unique_accounts
     
     if not accounts:
         print("❌ No accounts found for JWT refresh")
@@ -131,23 +164,57 @@ def refresh_all_tokens():
     print(f"🗑️ Removed {expired_count} expired tokens from bank")
     print(f"✅ Kept {len(valid_existing)} valid existing tokens")
     
-    # Add only new unique unexpired tokens
-    existing_token_strings = set(t.get("token") for t in valid_existing if isinstance(t, dict) and "token" in t)
-    
+    # Add only new unique unexpired tokens (refresh the token for a known account)
+    def account_id_of(tok):
+        try:
+            p = tok.split('.')[1]
+            p += '=' * (-len(p) % 4)
+            return json.loads(base64.urlsafe_b64decode(p)).get('account_id')
+        except Exception:
+            return None
+
+    existing_token_strings = set()
+    by_account = {}
+    for entry in valid_existing:
+        tok = entry.get("token") if isinstance(entry, dict) else None
+        if not tok:
+            continue
+        existing_token_strings.add(tok)
+        aid = account_id_of(tok)
+        if aid is not None:
+            by_account[aid] = entry
+
     added = 0
+    refreshed = 0
     for token_entry in new_tokens:
         token = token_entry.get("token")
-        if token and token not in existing_token_strings:
+        if not token or not is_token_fresh(token):
+            continue
+        if token in existing_token_strings:
+            continue
+        aid = account_id_of(token)
+        if aid is not None and aid in by_account:
+            old = by_account[aid]
+            existing_token_strings.discard(old.get("token"))
+            old["token"] = token
+            existing_token_strings.add(token)
+            refreshed += 1
+        else:
             valid_existing.append(token_entry)
             existing_token_strings.add(token)
+            if aid is not None:
+                by_account[aid] = token_entry
             added += 1
-    
+
+    # Final safety pass: never keep an expired token
+    valid_existing = [e for e in valid_existing if is_token_fresh(e.get("token"))]
+
     # Save updated token bank
-    if added > 0 or expired_count > 0:
+    if added > 0 or refreshed > 0 or expired_count > 0:
         with open("token_bd_1.json", "w") as f:
             json.dump(valid_existing, f, indent=2)
-        
-        print(f"✅ Auto JWT refresh: Added {added} new tokens, Removed {expired_count} expired tokens. Total: {len(valid_existing)}")
+
+        print(f"✅ Auto JWT refresh: added {added}, refreshed {refreshed}, removed {expired_count} expired. Total: {len(valid_existing)}")
     else:
         print(f"ℹ️ Auto JWT refresh: No changes needed. Total: {len(valid_existing)}")
 
@@ -212,12 +279,34 @@ def save_state(state):
         print(f"State save error: {e}")
 
 
+def jwt_expiry(token):
+    """Return the JWT exp (unix seconds), or 0 if it cannot be parsed."""
+    try:
+        if not isinstance(token, str) or token.count('.') != 2:
+            return 0
+        payload = token.split('.')[1]
+        payload += '=' * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+        return int(claims.get('exp', 0))
+    except Exception:
+        return 0
+
+
+def is_token_fresh(token, skew=60):
+    """True only if the JWT is well formed and not expired."""
+    return jwt_expiry(token) > time.time() + skew
+
+
 def load_token_file(file_name):
     try:
         with open(file_name, "r") as f:
             tokens = json.load(f)
         if isinstance(tokens, list) and all(isinstance(t, dict) and "token" in t for t in tokens):
-            return tokens
+            fresh = [t for t in tokens if is_token_fresh(t.get("token"))]
+            expired = len(tokens) - len(fresh)
+            if expired:
+                print(f"{file_name}: skipped {expired} expired tokens")
+            return fresh
         print(f"Warning: {file_name} invalid format.")
         return []
     except FileNotFoundError:
@@ -291,10 +380,84 @@ async def send_single_like_request(encrypted_like_payload, token_dict, url):
         return 997
 
 
+def _pb_read_varint(buf, i):
+    shift = 0
+    val = 0
+    while True:
+        b = buf[i]
+        i += 1
+        val |= (b & 0x7f) << shift
+        if not b & 0x80:
+            return val, i
+        shift += 7
+
+
+def _pb_fields(buf):
+    """Minimal protobuf field walker -> list of (field_number, value)."""
+    i = 0
+    out = []
+    while i < len(buf):
+        try:
+            key, i = _pb_read_varint(buf, i)
+        except Exception:
+            break
+        fnum, wt = key >> 3, key & 7
+        try:
+            if wt == 0:
+                v, i = _pb_read_varint(buf, i)
+                out.append((fnum, v))
+            elif wt == 2:
+                ln, i = _pb_read_varint(buf, i)
+                v = buf[i:i + ln]
+                i += ln
+                out.append((fnum, v))
+            elif wt == 5:
+                i += 4
+            elif wt == 1:
+                i += 8
+            else:
+                break
+        except Exception:
+            break
+    return out
+
+
+def parse_profile_extras(binary_data):
+    """Extract Level / Exp / Region from the raw AccountInfo protobuf.
+
+    Garena's AccountInfo has no 'Level' field in our .proto copy, but the
+    wire format carries it: field 6 = Level, field 7 = Exp, field 5 = Region.
+    """
+    extras = {"level": 0, "exp": 0, "region": None}
+    try:
+        top = _pb_fields(binary_data)
+        account_info = None
+        for fnum, val in top:
+            if fnum == 1 and isinstance(val, bytes):
+                account_info = val
+                break
+        if account_info is None:
+            return extras
+        for fnum, val in _pb_fields(account_info):
+            if fnum == 6 and isinstance(val, int):
+                extras["level"] = val
+            elif fnum == 7 and isinstance(val, int):
+                extras["exp"] = val
+            elif fnum == 5 and isinstance(val, bytes):
+                try:
+                    extras["region"] = val.decode("utf-8")
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"profile extras parse error: {e}")
+    return extras
+
+
 def make_profile_check_request(encrypted_profile_payload, server_name, token_dict):
+    """Returns (Info | None, raw_bytes | b'')."""
     token_value = token_dict.get("token", "")
     if not token_value:
-        return None
+        return None, b""
     if server_name == "IND":
         url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
     else:
@@ -315,10 +478,10 @@ def make_profile_check_request(encrypted_profile_payload, server_name, token_dic
     try:
         response = requests.post(url, data=edata, headers=headers, verify=False, timeout=10)
         response.raise_for_status()
-        return decode_protobuf_profile_info(response.content)
+        return decode_protobuf_profile_info(response.content), response.content
     except Exception as e:
         print(f"Profile check error: {e}")
-        return None
+        return None, b""
 
 
 def decode_protobuf_profile_info(binary_data):
@@ -386,7 +549,7 @@ def home():
             "/like": "?key=YOUR_KEY&uid=UID&server_name=BD",
             "/token_info": "?key=YOUR_KEY"
         },
-        "credits": "@HAFSAN_KUN"
+        "credits": "@DCFsolayman"
     })
 
 
@@ -400,13 +563,13 @@ def handle_requests():
     server_name_param = request.args.get("server_name", "BD").upper()
 
     if not uid_param:
-        return jsonify({"error": "UID is required", "credits": "@HAFSAN_KUN"}), 400
+        return jsonify({"error": "UID is required", "credits": "@DCFsolayman"}), 400
 
     all_tokens = load_all_tokens()
     if not all_tokens:
         return jsonify({
             "error": "No tokens loaded from token_bd_1.json or token_bd_2.json",
-            "credits": "@HAFSAN_KUN"
+            "credits": "@DCFsolayman"
         }), 500
 
     with state_lock:
@@ -418,7 +581,7 @@ def handle_requests():
         return jsonify({"error": "No token for profile check."}), 500
 
     enc_uid = enc_profile_check_payload(uid_param)
-    before_info = make_profile_check_request(enc_uid, server_name_param, profile_token)
+    before_info, before_raw = make_profile_check_request(enc_uid, server_name_param, profile_token)
     before_likes = int(before_info.AccountInfo.Likes) if (before_info and hasattr(before_info, 'AccountInfo')) else 0
     print(f"UID {uid_param}: before = {before_likes}")
 
@@ -435,7 +598,7 @@ def handle_requests():
             "UID": int(uid_param),
             "status": 2,
             "message": "All tokens reached daily limit. Try again tomorrow (UTC).",
-            "credits": "@HAFSAN_KUN"
+            "credits": "@DCFsolayman"
         })
 
     like_proto = create_protobuf_message(uid_param, server_name_param)
@@ -467,7 +630,7 @@ def handle_requests():
                 success_count += 1
         save_state(state)
 
-    after_info = make_profile_check_request(enc_uid, server_name_param, profile_token)
+    after_info, after_raw = make_profile_check_request(enc_uid, server_name_param, profile_token)
     after_likes = int(after_info.AccountInfo.Likes) if (after_info and hasattr(after_info, 'AccountInfo')) else before_likes
     nickname = "N/A"
     actual_uid = int(uid_param)
@@ -476,8 +639,10 @@ def handle_requests():
         actual_uid = int(after_info.AccountInfo.UID)
         if after_info.AccountInfo.PlayerNickname:
             nickname = str(after_info.AccountInfo.PlayerNickname)
-        if hasattr(after_info.AccountInfo, 'Level') and after_info.AccountInfo.Level:
-            player_level = int(after_info.AccountInfo.Level)
+    # Level / Exp are not in our .proto, read them from the raw wire format
+    extras = parse_profile_extras(after_raw or before_raw)
+    if extras.get("level"):
+        player_level = int(extras["level"])
 
     increment = after_likes - before_likes
     status = 1 if increment > 0 else 2
@@ -573,7 +738,7 @@ def token_info():
             "LIKES_PER_TOKEN_PER_DAY": LIKES_PER_TOKEN_PER_DAY,
             "LIKES_PER_USER_REQUEST": LIKES_PER_USER_REQUEST
         },
-        "credits": "@HAFSAN_KUN"
+        "credits": "@DCFsolayman"
     })
 
 
