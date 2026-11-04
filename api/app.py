@@ -139,6 +139,9 @@ def _account_id_of(token):
 def merge_tokens_into_bank(new_tokens):
     """Drop expired entries, replace the token of known accounts, add new ones.
 
+    Keeps existing valid tokens at the front (preserving order), new tokens
+    are appended after. Working tokens stay at the front even after refresh.
+
     Returns (total, added, refreshed, removed_expired).
     """
     try:
@@ -147,6 +150,7 @@ def merge_tokens_into_bank(new_tokens):
     except Exception:
         existing = []
 
+    # Keep existing valid tokens in their original order (working tokens stay first)
     valid = [e for e in existing if isinstance(e, dict) and is_token_fresh(e.get("token"))]
     removed = len(existing) - len(valid)
 
@@ -172,6 +176,7 @@ def merge_tokens_into_bank(new_tokens):
             seen_tokens.add(tok)
             refreshed += 1
         else:
+            # New tokens go after existing ones
             valid.append(entry)
             seen_tokens.add(tok)
             if aid is not None:
@@ -184,6 +189,38 @@ def merge_tokens_into_bank(new_tokens):
         json.dump(valid, f, indent=2)
 
     return len(valid), added, refreshed, removed
+
+
+def reorder_tokens_working_first(working_tokens):
+    """Reorder token_bd_1.json so working tokens appear first.
+
+    working_tokens: list of token strings that are known to work.
+    """
+    try:
+        with open("token_bd_1.json", "r") as f:
+            existing = json.load(f)
+    except Exception:
+        existing = []
+
+    valid = [e for e in existing if isinstance(e, dict) and is_token_fresh(e.get("token"))]
+
+    working_set = set(working_tokens)
+    working_entries = []
+    other_entries = []
+
+    for entry in valid:
+        tok = entry.get("token")
+        if tok in working_set:
+            working_entries.append(entry)
+        else:
+            other_entries.append(entry)
+
+    reordered = working_entries + other_entries
+
+    with open("token_bd_1.json", "w") as f:
+        json.dump(reordered, f, indent=2)
+
+    return len(reordered), len(working_entries)
 
 
 def _fetch_one_account(acc):
@@ -233,6 +270,15 @@ def refresh_all_tokens():
         REFRESH_STATE["last_fetched"] = total_fetched
         REFRESH_STATE["last_total"] = total_bank
         print(f"✅ Auto JWT refresh done: fetched {total_fetched}, bank now {total_bank}")
+
+        # Reorder: keep working tokens at the front
+        try:
+            with open("working_tokens.json", "r") as f:
+                working_tokens = json.load(f)
+            total, working_count = reorder_tokens_working_first(working_tokens)
+            print(f"🔄 Reordered bank: {working_count} working tokens at front, total {total}")
+        except Exception:
+            pass  # No working tokens file yet, skip reordering
     except Exception as e:
         REFRESH_STATE["last_error"] = str(e)
         print(f"❌ Auto refresh error: {e}")
