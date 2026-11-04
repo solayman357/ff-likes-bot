@@ -376,7 +376,9 @@ def enc_profile_check_payload(uid):
     return encrypt_message(create_protobuf_for_profile_check(uid))
 
 
-async def send_single_like_request(encrypted_like_payload, token_dict, url):
+async def send_single_like_request(encrypted_like_payload, token_dict, url, attempts=3):
+    """Send one like. Retries only transient failures (timeout / network / 5xx),
+    so a flaky connection never loses a request."""
     edata = bytes.fromhex(encrypted_like_payload)
     token_value = token_dict.get("token", "")
     if not token_value:
@@ -392,15 +394,25 @@ async def send_single_like_request(encrypted_like_payload, token_dict, url):
         'X-GA': "v1 1",
         'ReleaseVersion': "OB55"
     }
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, data=edata, headers=headers,
-                                    timeout=aiohttp.ClientTimeout(total=10)) as response:
-                return response.status
-    except asyncio.TimeoutError:
-        return 998
-    except Exception:
-        return 997
+    status = 997
+    for attempt in range(attempts):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, data=edata, headers=headers,
+                                        timeout=aiohttp.ClientTimeout(total=12)) as response:
+                    status = response.status
+                    await response.read()
+        except asyncio.TimeoutError:
+            status = 998
+        except Exception:
+            status = 997
+
+        # 200/4xx are final; only retry network errors and server errors
+        if status == 200 or (400 <= status < 500):
+            return status
+        if attempt < attempts - 1:
+            await asyncio.sleep(0.5 * (attempt + 1))
+    return status
 
 
 def _pb_read_varint(buf, i):
@@ -585,6 +597,13 @@ def handle_requests():
     uid_param = request.args.get("uid")
     server_name_param = request.args.get("server_name", "BD").upper()
 
+    # Per-request token budget: /like?...&limit=100 or &limit=240
+    try:
+        req_limit = int(request.args.get("limit", LIKES_PER_USER_REQUEST))
+    except (TypeError, ValueError):
+        req_limit = LIKES_PER_USER_REQUEST
+    req_limit = max(10, min(500, req_limit))
+
     if not uid_param:
         return jsonify({"error": "UID is required", "credits": "@DCFsolayman"}), 400
 
@@ -599,18 +618,37 @@ def handle_requests():
         state = load_state()
         usage = state["usage"]
 
-    profile_token = get_next_profile_token(all_tokens, state)
-    if not profile_token:
-        return jsonify({"error": "No token for profile check."}), 500
-
     enc_uid = enc_profile_check_payload(uid_param)
-    before_info, before_raw = make_profile_check_request(enc_uid, server_name_param, profile_token)
+
+    # Try a few tokens so one dead token can't kill the whole request
+    before_info, before_raw, profile_token = None, b"", None
+    with state_lock:
+        state = load_state()
+        start_idx = int(state.get("profile_idx", 0))
+    n_tokens = len(all_tokens)
+    for k in range(min(5, n_tokens)):
+        cand = all_tokens[(start_idx + k) % n_tokens][1]
+        info, raw = make_profile_check_request(enc_uid, server_name_param, cand)
+        if info is not None and hasattr(info, 'AccountInfo'):
+            profile_token, before_info, before_raw = cand, info, raw
+            with state_lock:
+                st = load_state()
+                st["profile_idx"] = (start_idx + k + 1) % n_tokens
+                save_state(st)
+            break
+
+    if profile_token is None:
+        return jsonify({
+            "error": "Could not load player profile right now. Please try again.",
+            "credits": "@DCFsolayman"
+        }), 503
+
     before_likes = int(before_info.AccountInfo.Likes) if (before_info and hasattr(before_info, 'AccountInfo')) else 0
     print(f"UID {uid_param}: before = {before_likes}")
 
     with state_lock:
         state = load_state()
-        selected = select_tokens_for_likes(all_tokens, LIKES_PER_USER_REQUEST, state)
+        selected = select_tokens_for_likes(all_tokens, req_limit, state)
 
     if not selected:
         return jsonify({

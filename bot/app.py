@@ -44,10 +44,11 @@ allowed_groups = {}
 daily_stats = {}
 user_limits = {}
 daily_limit = 2
+like_tokens = 240          # tokens per /like request (mode)
 
 # ============ HELPER FUNCTIONS ============
 def load_data():
-    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit
+    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens
     try:
         with open(DATA_FILES['allowed'], 'r') as f: allowed_groups = json.load(f)
     except: allowed_groups = {}
@@ -63,14 +64,15 @@ def load_data():
             bot_status = cfg.get('status', 'on')
             bot_mode = cfg.get('mode', 'public')
             daily_limit = cfg.get('limit', 2)
+            like_tokens = int(cfg.get('like_tokens', 240))
     except:
-        bot_status, bot_mode, daily_limit = 'on', 'public', 2
+        bot_status, bot_mode, daily_limit, like_tokens = 'on', 'public', 2, 240
 
 def save_all():
     with open(DATA_FILES['allowed'], 'w') as f: json.dump(allowed_groups, f, indent=2)
     with open(DATA_FILES['stats'], 'w') as f: json.dump(daily_stats, f, indent=2)
     with open(DATA_FILES['users'], 'w') as f: json.dump(user_limits, f, indent=2)
-    with open(DATA_FILES['config'], 'w') as f: json.dump({'status': bot_status, 'mode': bot_mode, 'limit': daily_limit}, f, indent=2)
+    with open(DATA_FILES['config'], 'w') as f: json.dump({'status': bot_status, 'mode': bot_mode, 'limit': daily_limit, 'like_tokens': like_tokens}, f, indent=2)
 
 def is_admin(uid): return uid in ADMIN_IDS
 def today_str(): return str(date.today())
@@ -102,10 +104,12 @@ def update_user_like(uid):
     daily_stats[t]['users'][suid] += 1
     save_all()
 
-async def call_like_api(server_name, uid):
+async def call_like_api(server_name, uid, limit=None):
     try:
         base = API_URL.rstrip("/") + "/"
         url = f"{base}like?uid={uid}&server_name={server_name}&key={API_KEY}"
+        if limit:
+            url += f"&limit={int(limit)}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                 if resp.status == 200:
@@ -241,8 +245,10 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply(update, f"⚠️ *Daily limit reached!*\nYou have used `{used}/{daily_limit}` likes today.\n💡 Try again tomorrow.")
         return
     
-    proc_msg = await update.message.reply_text(f"🔄 *Processing...*\nUID: `{uid}`\nRegion: `{region}`", parse_mode='Markdown')
-    data = await call_like_api(region, uid)
+    proc_msg = await update.message.reply_text(
+        f"🔄 *Processing...*\nUID: `{uid}`\nRegion: `{region}`\n🔢 Tokens: `{like_tokens}`",
+        parse_mode='Markdown')
+    data = await call_like_api(region, uid, like_tokens)
     
     if data is None or "error" in data:
         error_msg = data.get("error", "Unknown error") if data else "No response"
@@ -436,6 +442,37 @@ async def set_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_all()
     await reply(update, f"✅ *Daily limit set to `{daily_limit}` likes per user*")
 
+
+# ============ LIKE MODE COMMANDS ============
+async def set_api_100(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """100-token mode (~100-110 likes per request)."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    global like_tokens
+    like_tokens = 100
+    save_all()
+    await reply(update,
+                "✅ *API 100 mode ON*\n\n"
+                "🔢 Tokens per request: `100`\n"
+                "❤️ Expected likes: `~100-110`\n\n"
+                "Now send `/like BD UID`")
+
+
+async def set_api_max(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """MAX mode (240 tokens per request)."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    global like_tokens
+    like_tokens = 240
+    save_all()
+    await reply(update,
+                "✅ *MAX FF mode ON*\n\n"
+                "🔢 Tokens per request: `240`\n"
+                "❤️ Likes: as many as the 240 tokens can give\n\n"
+                "Now send `/like BD UID`")
+
 # ============ RENDER HEALTH SERVER (free web_service must bind $PORT) ============
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -490,6 +527,9 @@ def main():
     app.add_handler(CommandHandler("setprivate", set_private))
     app.add_handler(CommandHandler("setpublic", set_public))
     app.add_handler(CommandHandler("setlimit", set_limit))
+    app.add_handler(CommandHandler("setapi100", set_api_100))
+    app.add_handler(CommandHandler("setapimax", set_api_max))
+    app.add_handler(CommandHandler("maxff", set_api_max))
     app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
     
     print("🤖 Bot is running...")
