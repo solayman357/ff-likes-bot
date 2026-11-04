@@ -562,7 +562,7 @@ def add_to_broadcast(chat_id, chat_type, chat_title=None):
         with open(BROADCAST_FILE, "r") as f:
             data = json.load(f)
     except Exception:
-        data = {"chats": {}}
+        data = {"chats": {}, "users": {}}
 
     cid = str(chat_id)
     if cid not in data["chats"]:
@@ -570,6 +570,29 @@ def add_to_broadcast(chat_id, chat_type, chat_title=None):
             "chat_id": chat_id,
             "chat_type": chat_type,
             "title": chat_title or "",
+            "added_at": str(date.today())
+        }
+        with open(BROADCAST_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+
+
+def add_user_to_broadcast(user_id, username=None, first_name=None):
+    """Add a user to the broadcast list."""
+    try:
+        with open(BROADCAST_FILE, "r") as f:
+            data = json.load(f)
+    except Exception:
+        data = {"chats": {}, "users": {}}
+
+    uid = str(chat_id)
+    if "users" not in data:
+        data["users"] = {}
+    uid = str(chat_id)
+    if uid not in data["users"]:
+        data["users"][uid] = {
+            "user_id": user_id,
+            "username": username or "",
+            "first_name": first_name or "",
             "added_at": str(date.today())
         }
         with open(BROADCAST_FILE, "w") as f:
@@ -666,16 +689,26 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     chats = data.get("chats", {})
-    if not chats:
-        await reply(update, "❌ No chats in broadcast list.")
+    users = data.get("users", {})
+    if not chats and not users:
+        await reply(update, "❌ No chats or users in broadcast list.")
         return
 
     sent = 0
     failed = 0
 
-    for cid, info in chats.items():
+    # Send to groups/chats
+    for cid, info in data.get("chats", {}).items():
         try:
             await context.bot.send_message(chat_id=int(cid), text=f"📢 *Broadcast:*\n\n{message}", parse_mode='Markdown')
+            sent += 1
+        except Exception:
+            failed += 1
+
+    # Send to users
+    for uid, info in data.get("users", {}).items():
+        try:
+            await context.bot.send_message(chat_id=int(uid), text=f"📢 *Broadcast:*\n\n{message}", parse_mode='Markdown')
             sent += 1
         except Exception:
             failed += 1
