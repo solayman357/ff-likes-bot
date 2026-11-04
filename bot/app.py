@@ -256,6 +256,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if bot_status == "off":
         await reply(update, "🔴 Bot is currently OFF")
         return
+    # Add to broadcast list
+    chat = update.effective_chat
+    add_to_broadcast(chat.id, chat.type, chat.title)
     msg = (
         "✨ *𝑭𝑹𝑬𝑬 𝑭𝑰𝑹𝑬 𝑳𝑰𝑲𝑬 𝑩𝑶𝑻* ✨\n"
         "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
@@ -290,7 +293,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/setlimit <num>` – Set daily limit per user\n"
         "`/setapi100` – Set to 100 tokens (~100–110 likes)\n"
         "`/setapi <num>` – Set custom tokens (10–400)\n"
-        "`/setapimax` or `/maxff` – Set to 400 tokens (max)"
+        "`/setapimax` or `/maxff` – Set to 400 tokens (max)\n"
+        "`/setforcejoin <channel> <link>` – Enable force join\n"
+        "`/removeforcejoin` – Disable force join\n"
+        "`/forcejoinstatus` – Check force join status\n"
+        "`/broadcast <message>` – Send message to all chats"
     )
     await reply(update, msg)
 
@@ -474,52 +481,65 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _respond(result)
 
 # ============ JWT TOKEN UPLOAD HANDLER ============
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Broadcast list file
+BROADCAST_FILE = "broadcast_list.json"
+
+
+def add_to_broadcast(chat_id, chat_type, chat_title=None):
+    """Add a chat to the broadcast list."""
+    try:
+        with open(BROADCAST_FILE, "r") as f:
+            data = json.load(f)
+    except Exception:
+        data = {"chats": {}}
+
+    cid = str(chat_id)
+    if cid not in data["chats"]:
+        data["chats"][cid] = {
+            "chat_id": chat_id,
+            "chat_type": chat_type,
+            "title": chat_title or "",
+            "added_at": str(date.today())
+        }
+        with open(BROADCAST_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+
+
+async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Broadcast a message to all users and groups. Admin only."""
     if not is_admin(update.effective_user.id):
-        await reply(update, "❌ *Admin only command*")
+        await reply(update, "❌ Admin only")
         return
 
-    document = update.message.document
-    if not document:
-        await reply(update, "❌ *No document found.*")
+    if not context.args:
+        await reply(update, "❌ Usage: `/broadcast <message>`\nExample: `/broadcast Hello everyone!`")
         return
 
-    file_name = document.file_name or ""
-    if not file_name.endswith(".json"):
-        await reply(update, "❌ *Please upload a valid JSON file.*")
-        return
+    message = " ".join(context.args)
 
     try:
-        file = await context.bot.get_document(document.file_id)
-        file_bytes = await file.download_as_bytearray()
-        
+        with open(BROADCAST_FILE, "r") as f:
+            data = json.load(f)
+    except Exception:
+        await reply(update, "❌ No broadcast list found.")
+        return
+
+    chats = data.get("chats", {})
+    if not chats:
+        await reply(update, "❌ No chats in broadcast list.")
+        return
+
+    sent = 0
+    failed = 0
+
+    for cid, info in chats.items():
         try:
-            new_tokens = json.loads(file_bytes.decode('utf-8'))
-        except Exception as e:
-            await reply(update, f"❌ *Invalid JSON file:* `{str(e)[:100]}`")
-            return
+            await context.bot.send_message(chat_id=int(cid), text=f"📢 *Broadcast:*\n\n{message}", parse_mode='Markdown')
+            sent += 1
+        except Exception:
+            failed += 1
 
-        # Forward tokens to API's /upload-tokens endpoint
-        upload_url = f"{API_URL.rstrip('/')}/upload-tokens"
-        payload = {"tokens": new_tokens}
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(upload_url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                result = await resp.json()
-
-        if resp.status == 200:
-            await reply(update,
-                f"✅ *Token Update Complete*\n\n"
-                f"✅ Added: {result.get('added', 0)}\n"
-                f"❌ Expired: {result.get('expired', 0)}\n"
-                f"📁 Total in bank: {result.get('total_in_bank', 0)}"
-            )
-        else:
-            error_msg = result.get("error", "Unknown error") if isinstance(result, dict) else str(result)
-            await reply(update, f"❌ *API Error:* `{error_msg}`")
-
-    except Exception as e:
-        await reply(update, f"❌ *Error processing file:* `{str(e)[:100]}`")
+    await reply(update, f"✅ Broadcast sent!\n📤 Sent: {sent}\n❌ Failed: {failed}\n📊 Total: {sent + failed}")
 
 # ============ ADMIN COMMANDS ============
 async def allow_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -835,6 +855,7 @@ def main():
         app.add_handler(CommandHandler("setforcejoin", setforcejoin))
         app.add_handler(CommandHandler("removeforcejoin", removeforcejoin))
         app.add_handler(CommandHandler("forcejoinstatus", forcejoinstatus))
+        app.add_handler(CommandHandler("broadcast", broadcast_cmd))
         app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
         app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
         app.add_error_handler(error_handler)
