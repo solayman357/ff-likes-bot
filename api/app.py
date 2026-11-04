@@ -30,7 +30,7 @@ WRONG_KEY_RESPONSE = {
 
 TOKENS_PER_FILE = 111
 LIKES_PER_TOKEN_PER_DAY = 150
-LIKES_PER_USER_REQUEST = 240
+LIKES_PER_USER_REQUEST = 400
 TOKEN_FILES = ["token_bd_1.json", "token_bd_2.json"]
 ACCOUNT_JSON_SOURCES = ["accounts20_part2.json", "sol.lost_account.json"]
 
