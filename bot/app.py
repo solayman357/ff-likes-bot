@@ -11,6 +11,7 @@ from datetime import datetime, date
 from datetime import time as datetime_time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from github_persistence import init_github_persistence, get_github_persistence
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 from telegram.request import HTTPXRequest
 from telegram.error import BadRequest, NetworkError, RetryAfter, TelegramError
@@ -57,8 +58,36 @@ forward_channel_id = ""
 forward_channel_link = ""
 
 # ============ HELPER FUNCTIONS ============
-def load_data():
-    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channels, force_join_links
+async def load_data():
+    """Load data from local files and sync from GitHub."""
+    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channels, force_join_links, forward_channel_id, forward_channel_link
+    global github_persistence
+    
+    if github_persistence:
+        try:
+            # Try to sync from GitHub first
+            github_persistence.pull_latest()
+            
+            # Load from local files (which are now synced)
+            with open(DATA_FILES['allowed'], 'r') as f: allowed_groups = json.load(f)
+            with open(DATA_FILES['stats'], 'r') as f: daily_stats = json.load(f)
+            with open(DATA_FILES['users'], 'r') as f: user_limits = json.load(f)
+            with open(DATA_FILES['config'], 'r') as f:
+                cfg = json.load(f)
+                bot_status = cfg.get('status', 'on')
+                bot_mode = cfg.get('mode', 'public')
+                daily_limit = cfg.get('limit', 2)
+                like_tokens = int(cfg.get('like_tokens', 240))
+                force_join = cfg.get('force_join', False)
+                force_join_channels = cfg.get('force_join_channels', [])
+                force_join_links = cfg.get('force_join_links', {})
+                forward_channel_id = cfg.get('forward_channel_id', '')
+                forward_channel_link = cfg.get('forward_channel_link', '')
+            return
+        except Exception as e:
+            print(f"⚠️ GitHub sync failed, using local files: {e}", flush=True)
+    
+    # Fallback to local files only
     try:
         with open(DATA_FILES['allowed'], 'r') as f: allowed_groups = json.load(f)
     except: allowed_groups = {}
@@ -88,6 +117,14 @@ def save_all():
     with open(DATA_FILES['stats'], 'w') as f: json.dump(daily_stats, f, indent=2)
     with open(DATA_FILES['users'], 'w') as f: json.dump(user_limits, f, indent=2)
     with open(DATA_FILES['config'], 'w') as f: json.dump({'status': bot_status, 'mode': bot_mode, 'limit': daily_limit, 'like_tokens': like_tokens, 'force_join': force_join, 'force_join_channels': force_join_channels, 'force_join_links': force_join_links, 'forward_channel_id': forward_channel_id, 'forward_channel_link': forward_channel_link}, f, indent=2)
+    
+    # Queue for GitHub sync
+    global github_persistence
+    if github_persistence:
+        github_persistence.queue_push('allowed')
+        github_persistence.queue_push('stats')
+        github_persistence.queue_push('users')
+        github_persistence.queue_push('config')
 
 async def is_user_member(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
     if not force_join or not force_join_channels:
@@ -935,6 +972,10 @@ def start_health_server():
 
 # ============ MAIN ============
 def main():
+    global github_persistence
+    # Initialize GitHub persistence
+    github_persistence = init_github_persistence()
+    
     # Start health server first so Render can reach us even if polling is down
     try:
         start_health_server()
