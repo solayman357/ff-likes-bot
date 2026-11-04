@@ -889,7 +889,7 @@ def start_health_server():
 
 
 # ============ MAIN ============
-async def main():
+def main():
     # Start health server first so Render can reach us even if polling is down
     try:
         start_health_server()
@@ -940,14 +940,14 @@ async def main():
 
         # Test bot identity before polling
         try:
-            bot_info = await app.bot.get_me()
+            bot_info = app.bot.get_me()
             print(f"✅ Bot identity confirmed: @{bot_info.username} (id={bot_info.id})", flush=True)
         except Exception as e:
             print(f"❌ Failed to get bot info: {e}", flush=True)
 
         # Delete any existing webhook to avoid conflicts
         try:
-            await app.bot.delete_webhook(drop_pending_updates=True)
+            app.bot.delete_webhook(drop_pending_updates=True)
             print("🗑️ Deleted existing webhook, dropped pending updates", flush=True)
         except Exception as e:
             print(f"⚠️ Failed to delete webhook: {e}", flush=True)
@@ -957,20 +957,20 @@ async def main():
         while True:
             try:
                 print("📡 Starting polling...", flush=True)
-                await app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+                app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
             except Exception as e:
                 import traceback
                 print(f"❌ Polling error: {e}", flush=True)
                 traceback.print_exc()
                 print("🔄 Restarting polling in 5 seconds...", flush=True)
-                await asyncio.sleep(5)
+                time.sleep(5)
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
         traceback.print_exc()
         # Keep process alive so health server can still respond
         while True:
-            await asyncio.sleep(60)
+            time.sleep(60)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
