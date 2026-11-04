@@ -3,4 +3,5 @@ python-telegram-bot
 apscheduler
 aiohttp
 protobuf>=5.27.0
-googleapis-common-protos
+pycryptodome
+pytz
