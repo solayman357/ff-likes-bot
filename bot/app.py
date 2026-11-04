@@ -650,50 +650,68 @@ def start_health_server():
     Telegram polling keeps running on the main thread via app.run_polling().
     """
     port = int(os.environ.get("PORT", "10000"))
-    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    print(f"🌐 Health server listening on 0.0.0.0:{port}")
+    for try_port in (port, 10000, 8080, 5000):
+        try:
+            server = HTTPServer(("0.0.0.0", try_port), _HealthHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            print(f"🌐 Health server listening on 0.0.0.0:{try_port}")
+            return
+        except Exception as e:
+            print(f"⚠️ Health server port {try_port} failed: {e}")
+            continue
+    print("❌ Health server could not bind to any port")
 
 
 # ============ MAIN ============
 def main():
-    start_health_server()
+    try:
+        start_health_server()
+    except Exception as e:
+        print(f"❌ Health server failed: {e}")
 
-    load_data()
+    try:
+        load_data()
+    except Exception as e:
+        print(f"❌ load_data failed: {e}")
     
-    request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
-    app = Application.builder().token(BOT_TOKEN).request(request).build()
-    
-    job_queue = app.job_queue
-    if job_queue:
-        job_queue.run_daily(reset_midnight, time=time(hour=0, minute=0, second=0), days=tuple(range(7)))
-        print("⏰ Midnight reset scheduled")
-    
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("info", info_cmd))
-    app.add_handler(CommandHandler("like", like_cmd))
-    app.add_handler(CommandHandler("allow", allow_group))
-    app.add_handler(CommandHandler("off", off_cmd))
-    app.add_handler(CommandHandler("on", on_cmd))
-    app.add_handler(CommandHandler("stats", stats_cmd))
-    app.add_handler(CommandHandler("setprivate", set_private))
-    app.add_handler(CommandHandler("setpublic", set_public))
-    app.add_handler(CommandHandler("setlimit", set_limit))
-    app.add_handler(CommandHandler("setapi100", set_api_100))
-    app.add_handler(CommandHandler("setapimax", set_api_max))
-    app.add_handler(CommandHandler("maxff", set_api_max))
-    app.add_handler(CommandHandler("setforcejoin", setforcejoin))
-    app.add_handler(CommandHandler("removeforcejoin", removeforcejoin))
-    app.add_handler(CommandHandler("forcejoinstatus", forcejoinstatus))
-    app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
-    app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
-    
-    print("🤖 Bot is running...")
-    print("   → Normal users: only in groups, daily limit applies")
-    print("   → Admin users: anywhere (DM + groups), unlimited likes")
-    app.run_polling()
+    try:
+        request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
+        app = Application.builder().token(BOT_TOKEN).request(request).build()
+        
+        job_queue = app.job_queue
+        if job_queue:
+            job_queue.run_daily(reset_midnight, time=time(hour=0, minute=0, second=0), days=tuple(range(7)))
+            print("⏰ Midnight reset scheduled")
+        
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("help", help_cmd))
+        app.add_handler(CommandHandler("info", info_cmd))
+        app.add_handler(CommandHandler("like", like_cmd))
+        app.add_handler(CommandHandler("allow", allow_group))
+        app.add_handler(CommandHandler("off", off_cmd))
+        app.add_handler(CommandHandler("on", on_cmd))
+        app.add_handler(CommandHandler("stats", stats_cmd))
+        app.add_handler(CommandHandler("setprivate", set_private))
+        app.add_handler(CommandHandler("setpublic", set_public))
+        app.add_handler(CommandHandler("setlimit", set_limit))
+        app.add_handler(CommandHandler("setapi100", set_api_100))
+        app.add_handler(CommandHandler("setapimax", set_api_max))
+        app.add_handler(CommandHandler("maxff", set_api_max))
+        app.add_handler(CommandHandler("setforcejoin", setforcejoin))
+        app.add_handler(CommandHandler("removeforcejoin", removeforcejoin))
+        app.add_handler(CommandHandler("forcejoinstatus", forcejoinstatus))
+        app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
+        app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
+        
+        print("🤖 Bot is running...")
+        print("   → Normal users: only in groups, daily limit applies")
+        print("   → Admin users: anywhere (DM + groups), unlimited likes")
+        app.run_polling()
+    except Exception as e:
+        print(f"❌ Bot crashed: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
