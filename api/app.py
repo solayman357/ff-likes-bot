@@ -15,6 +15,7 @@ import urllib3
 import time
 import base64
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 # -------------------------------
@@ -32,6 +33,13 @@ LIKES_PER_TOKEN_PER_DAY = 150
 LIKES_PER_USER_REQUEST = 300
 TOKEN_FILES = ["token_bd_1.json", "token_bd_2.json"]
 ACCOUNT_JSON_SOURCES = ["accounts20_part2.json", "sol.lost_account.json"]
+
+# JWT provider endpoints (comma separated in the JWT_API_URLS env var)
+JWT_API_URLS = [
+    u.strip()
+    for u in os.getenv("JWT_API_URLS", "https://kawsarxjwt.lovable.app/api/public/token").split(",")
+    if u.strip()
+]
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -64,11 +72,18 @@ def fetch_jwt_from_api(uid, password, api_url):
         print(f"JWT fetch error for {uid}: {e}")
     return None
 
-def refresh_all_tokens():
-    """Fetch fresh JWT tokens from JWT API for all accounts"""
-    print("🔄 Starting auto JWT refresh...")
-    
-    # Load accounts from account files
+REFRESH_STATE = {
+    "running": False,
+    "last_run": None,
+    "last_fetched": 0,
+    "last_total": 0,
+    "last_error": None,
+}
+REFRESH_LOCK = threading.Lock()
+
+
+def _load_accounts_for_refresh():
+    """All accounts from the txt files + the JSON sources shipped in the repo."""
     accounts = []
     for fname in ["account_bd.txt", "account_ind.txt"]:
         if os.path.exists(fname):
@@ -84,7 +99,6 @@ def refresh_all_tokens():
                         if uid and pwd and uid.isdigit():
                             accounts.append({"uid": uid, "password": pwd})
 
-    # Also load JSON account sources shipped in the repo
     for jname in ACCOUNT_JSON_SOURCES:
         if not os.path.exists(jname):
             continue
@@ -103,120 +117,129 @@ def refresh_all_tokens():
                 if uid and pwd and uid.isdigit():
                     accounts.append({"uid": uid, "password": pwd})
 
-    # De-duplicate by uid+password
-    seen_acc = set()
-    unique_accounts = []
+    seen = set()
+    unique = []
     for a in accounts:
         k = (a["uid"], a["password"])
-        if k not in seen_acc:
-            seen_acc.add(k)
-            unique_accounts.append(a)
-    accounts = unique_accounts
-    
-    if not accounts:
-        print("❌ No accounts found for JWT refresh")
-        return
-    
-    print(f"📊 Found {len(accounts)} accounts for JWT refresh")
-    
-    # Fetch tokens from JWT API
-    new_tokens = []
-    for acc in accounts:
-        token_dict = None
-        for api_url in JWT_API_URLS:
-            token_dict = fetch_jwt_from_api(acc['uid'], acc['password'], api_url)
-            if token_dict:
-                break
-        
-        if token_dict:
-            new_tokens.append(token_dict)
-    
-    print(f"🔑 Fetched {len(new_tokens)} new tokens from JWT API")
-    
-    # Load existing tokens
-    existing_tokens = []
+        if k not in seen:
+            seen.add(k)
+            unique.append(a)
+    return unique
+
+
+def _account_id_of(token):
+    try:
+        p = token.split('.')[1]
+        p += '=' * (-len(p) % 4)
+        return json.loads(base64.urlsafe_b64decode(p)).get('account_id')
+    except Exception:
+        return None
+
+
+def merge_tokens_into_bank(new_tokens):
+    """Drop expired entries, replace the token of known accounts, add new ones.
+
+    Returns (total, added, refreshed, removed_expired).
+    """
     try:
         with open("token_bd_1.json", "r") as f:
-            existing_tokens = json.load(f)
+            existing = json.load(f)
     except Exception:
-        existing_tokens = []
-    
-    # Remove expired tokens from existing bank
-    now = time.time()
-    valid_existing = []
-    expired_count = 0
-    for entry in existing_tokens:
-        token = entry.get("token", "") if isinstance(entry, dict) else entry
-        if not isinstance(token, str) or token.count('.') != 2:
-            expired_count += 1
-            continue
-        try:
-            payload = token.split('.')[1] + '=' * (-len(token.split('.')[1]) % 4)
-            claims = json.loads(base64.urlsafe_b64decode(payload))
-            exp = int(claims.get('exp', 0))
-            if exp > now:
-                valid_existing.append(entry)
-            else:
-                expired_count += 1
-        except Exception:
-            expired_count += 1
-    
-    print(f"🗑️ Removed {expired_count} expired tokens from bank")
-    print(f"✅ Kept {len(valid_existing)} valid existing tokens")
-    
-    # Add only new unique unexpired tokens (refresh the token for a known account)
-    def account_id_of(tok):
-        try:
-            p = tok.split('.')[1]
-            p += '=' * (-len(p) % 4)
-            return json.loads(base64.urlsafe_b64decode(p)).get('account_id')
-        except Exception:
-            return None
+        existing = []
 
-    existing_token_strings = set()
+    valid = [e for e in existing if isinstance(e, dict) and is_token_fresh(e.get("token"))]
+    removed = len(existing) - len(valid)
+
+    seen_tokens = set()
     by_account = {}
-    for entry in valid_existing:
-        tok = entry.get("token") if isinstance(entry, dict) else None
-        if not tok:
-            continue
-        existing_token_strings.add(tok)
-        aid = account_id_of(tok)
+    for entry in valid:
+        tok = entry.get("token")
+        seen_tokens.add(tok)
+        aid = _account_id_of(tok)
         if aid is not None:
             by_account[aid] = entry
 
-    added = 0
-    refreshed = 0
-    for token_entry in new_tokens:
-        token = token_entry.get("token")
-        if not token or not is_token_fresh(token):
+    added = refreshed = 0
+    for entry in new_tokens:
+        tok = entry.get("token")
+        if not tok or not is_token_fresh(tok) or tok in seen_tokens:
             continue
-        if token in existing_token_strings:
-            continue
-        aid = account_id_of(token)
+        aid = _account_id_of(tok)
         if aid is not None and aid in by_account:
             old = by_account[aid]
-            existing_token_strings.discard(old.get("token"))
-            old["token"] = token
-            existing_token_strings.add(token)
+            seen_tokens.discard(old.get("token"))
+            old["token"] = tok
+            seen_tokens.add(tok)
             refreshed += 1
         else:
-            valid_existing.append(token_entry)
-            existing_token_strings.add(token)
+            valid.append(entry)
+            seen_tokens.add(tok)
             if aid is not None:
-                by_account[aid] = token_entry
+                by_account[aid] = entry
             added += 1
 
-    # Final safety pass: never keep an expired token
-    valid_existing = [e for e in valid_existing if is_token_fresh(e.get("token"))]
+    valid = [e for e in valid if is_token_fresh(e.get("token"))]
 
-    # Save updated token bank
-    if added > 0 or refreshed > 0 or expired_count > 0:
-        with open("token_bd_1.json", "w") as f:
-            json.dump(valid_existing, f, indent=2)
+    with open("token_bd_1.json", "w") as f:
+        json.dump(valid, f, indent=2)
 
-        print(f"✅ Auto JWT refresh: added {added}, refreshed {refreshed}, removed {expired_count} expired. Total: {len(valid_existing)}")
-    else:
-        print(f"ℹ️ Auto JWT refresh: No changes needed. Total: {len(valid_existing)}")
+    return len(valid), added, refreshed, removed
+
+
+def _fetch_one_account(acc):
+    for api_url in JWT_API_URLS:
+        token_dict = fetch_jwt_from_api(acc["uid"], acc["password"], api_url)
+        if token_dict:
+            return token_dict
+    return None
+
+
+def refresh_all_tokens():
+    """Fetch fresh JWTs for every account and rebuild the bank.
+
+    Runs in chunks so partial results are saved quickly (important on
+    Render's free tier, which can sleep mid-refresh).
+    """
+    print("🔄 Starting auto JWT refresh...")
+    if not REFRESH_LOCK.acquire(blocking=False):
+        print("ℹ️ Refresh already running - skipped")
+        return
+
+    REFRESH_STATE["running"] = True
+    REFRESH_STATE["last_error"] = None
+    try:
+        accounts = _load_accounts_for_refresh()
+        if not accounts:
+            print("❌ No accounts found for JWT refresh")
+            REFRESH_STATE["last_error"] = "no accounts"
+            return
+
+        print(f"📊 {len(accounts)} accounts for JWT refresh")
+        total_fetched = 0
+        total_bank = 0
+        CHUNK = 100
+
+        for start in range(0, len(accounts), CHUNK):
+            chunk = accounts[start:start + CHUNK]
+            with ThreadPoolExecutor(max_workers=10) as ex:
+                results = list(ex.map(_fetch_one_account, chunk))
+            batch = [r for r in results if r]
+            total_fetched += len(batch)
+            if batch:
+                total_bank, added, refreshed, removed = merge_tokens_into_bank(batch)
+                print(f"  chunk {start // CHUNK + 1}: fetched={len(batch)} bank={total_bank} "
+                      f"added={added} refreshed={refreshed} removed_expired={removed}")
+
+        REFRESH_STATE["last_fetched"] = total_fetched
+        REFRESH_STATE["last_total"] = total_bank
+        print(f"✅ Auto JWT refresh done: fetched {total_fetched}, bank now {total_bank}")
+    except Exception as e:
+        REFRESH_STATE["last_error"] = str(e)
+        print(f"❌ Auto refresh error: {e}")
+    finally:
+        REFRESH_STATE["running"] = False
+        REFRESH_STATE["last_run"] = time.time()
+        REFRESH_LOCK.release()
 
 def auto_refresh_job():
     """Background job to refresh JWT tokens periodically"""
@@ -677,6 +700,44 @@ def health_check():
     return jsonify({"status": "ok", "service": "ff-likes-api"})
 
 
+@app.route('/refresh', methods=['GET'])
+def manual_refresh():
+    """Trigger a token refresh in the background. /refresh?key=..."""
+    if request.args.get('key') != API_KEY:
+        return jsonify(WRONG_KEY_RESPONSE), 401
+    if REFRESH_STATE["running"]:
+        return jsonify({"status": "already_running"})
+    threading.Thread(target=refresh_all_tokens, daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@app.route('/refresh_status', methods=['GET'])
+def refresh_status():
+    if request.args.get('key') != API_KEY:
+        return jsonify(WRONG_KEY_RESPONSE), 401
+
+    all_tokens = load_all_tokens()
+    last_run = REFRESH_STATE["last_run"]
+    next_run = None
+    if last_run:
+        next_run = last_run + JWT_REFRESH_MINUTES * 60
+
+    def fmt(ts):
+        return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(ts)) if ts else None
+
+    return jsonify({
+        "valid_tokens_in_bank": len(all_tokens),
+        "auto_refresh_enabled": AUTO_REFRESH_ENABLED,
+        "interval_minutes": JWT_REFRESH_MINUTES,
+        "refresh_running": REFRESH_STATE["running"],
+        "last_refresh": fmt(last_run),
+        "next_refresh_if_awake": fmt(next_run),
+        "last_fetched": REFRESH_STATE["last_fetched"],
+        "last_error": REFRESH_STATE["last_error"],
+        "credits": "@DCFsolayman"
+    })
+
+
 @app.route('/remain', methods=['GET'])
 def remain_info():
     key = request.args.get('key')
@@ -742,6 +803,14 @@ def token_info():
     })
 
 
+# Render runs this module through gunicorn (app:app), so __main__ never runs.
+# Start the refresh thread at import time; DISABLE_AUTO_REFRESH=1 turns it off.
+if os.getenv("DISABLE_AUTO_REFRESH") != "1":
+    try:
+        start_auto_refresh()
+    except Exception as _e:
+        print(f"auto refresh start failed: {_e}")
+
+
 if __name__ == '__main__':
-    start_auto_refresh()
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
