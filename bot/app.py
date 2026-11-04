@@ -230,14 +230,17 @@ async def reply(update, text):
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log errors and notify user."""
-    print(f"Exception while handling update: {context.error}", flush=True)
+    """Log errors and notify user with actual error details."""
     import traceback
+    err = context.error
+    print(f"Exception while handling update: {err}", flush=True)
     traceback.print_exc()
+    err_type = type(err).__name__
+    err_msg = str(err)[:200]
     try:
         if hasattr(update, 'effective_message') and update.effective_message:
             await update.effective_message.reply_text(
-                "❌ Something went wrong. Please try again later."
+                f"❌ Bot error: {err_type}\n{err_msg}\n\nPlease contact the bot admin."
             )
     except Exception:
         pass
@@ -316,6 +319,17 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply(update, "🔴 Bot is currently OFF")
         return
 
+    try:
+        await _like_cmd_inner(update, context)
+    except Exception as e:
+        import traceback
+        print(f"❌ Uncaught exception in like_cmd: {e}", flush=True)
+        traceback.print_exc()
+        await reply(update, f"❌ Like command error: {type(e).__name__}\n{str(e)[:200]}")
+
+
+async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inner like command logic (separated for error handling)."""
     chat_id = update.effective_chat.id
     chat_type = update.effective_chat.type
     if chat_type != "private" and not is_group_allowed(chat_id, chat_type):
