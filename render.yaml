@@ -12,7 +12,7 @@ services:
         sync: false
     healthCheckPath: /health
 
-  - type: worker
+  - type: web_service
     name: ff-likes-bot
     runtime: python
     rootDirectory: bot
@@ -32,3 +32,4 @@ services:
           name: ff-likes-api
           type: web_service
           property: url
+    healthCheckPath: /health
