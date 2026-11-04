@@ -8,8 +8,8 @@ import aiohttp
 import asyncio
 from datetime import datetime, date, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 from telegram.request import HTTPXRequest
 
 # Protobuf imports (local copies for Render deployment)
@@ -45,10 +45,13 @@ daily_stats = {}
 user_limits = {}
 daily_limit = 2
 like_tokens = 240          # tokens per /like request (mode)
+force_join = True
+force_join_channel = "@"
+force_join_link = "https://t.me/+k4aq8eU9tYw1MTU1"
 
 # ============ HELPER FUNCTIONS ============
 def load_data():
-    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens
+    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channel, force_join_link
     try:
         with open(DATA_FILES['allowed'], 'r') as f: allowed_groups = json.load(f)
     except: allowed_groups = {}
@@ -65,17 +68,75 @@ def load_data():
             bot_mode = cfg.get('mode', 'public')
             daily_limit = cfg.get('limit', 2)
             like_tokens = int(cfg.get('like_tokens', 240))
+            force_join = cfg.get('force_join', True)
+            force_join_channel = cfg.get('force_join_channel', '@')
+            force_join_link = cfg.get('force_join_link', 'https://t.me/+k4aq8eU9tYw1MTU1')
     except:
-        bot_status, bot_mode, daily_limit, like_tokens = 'on', 'public', 2, 240
+        bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channel, force_join_link = 'on', 'public', 2, 240, True, '@', 'https://t.me/+k4aq8eU9tYw1MTU1'
 
 def save_all():
     with open(DATA_FILES['allowed'], 'w') as f: json.dump(allowed_groups, f, indent=2)
     with open(DATA_FILES['stats'], 'w') as f: json.dump(daily_stats, f, indent=2)
     with open(DATA_FILES['users'], 'w') as f: json.dump(user_limits, f, indent=2)
-    with open(DATA_FILES['config'], 'w') as f: json.dump({'status': bot_status, 'mode': bot_mode, 'limit': daily_limit, 'like_tokens': like_tokens}, f, indent=2)
+    with open(DATA_FILES['config'], 'w') as f: json.dump({'status': bot_status, 'mode': bot_mode, 'limit': daily_limit, 'like_tokens': like_tokens, 'force_join': force_join, 'force_join_channel': force_join_channel, 'force_join_link': force_join_link}, f, indent=2)
 
-def is_admin(uid): return uid in ADMIN_IDS
-def today_str(): return str(date.today())
+async def is_user_member(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+    if not force_join or not force_join_channel:
+        return True
+    try:
+        member = await context.bot.get_chat_member(chat_id=force_join_channel, user_id=user_id)
+        if member.status in ['member', 'administrator', 'creator']:
+            return True
+        return False
+    except Exception as e:
+        print(f"Force join check error: {e}")
+        return False
+
+
+async def force_join_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not force_join or not force_join_link:
+        return True
+    if is_admin(update.effective_user.id):
+        return True
+    user_id = update.effective_user.id
+    if await is_user_member(context, user_id):
+        return True
+    keyboard = [
+        [InlineKeyboardButton("📢 Join Group", url=force_join_link)],
+        [InlineKeyboardButton("✅ I Joined - Verify", callback_data="verify_join")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await reply(update,
+               "⚠️ *Force Join Required*\n\n"
+               "You must join our group to use this bot!\n\n"
+               "1️⃣ Click 'Join Group' and join\n"
+               "2️⃣ Come back and click 'I Joined - Verify'\n\n"
+               "Bot will verify automatically.",
+               reply_markup)
+    return False
+
+
+async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    if await is_user_member(context, user_id):
+        await query.edit_message_text(
+            "✅ *Verification Successful!*\n\n"
+            "You can now use the bot.\n"
+            "Send /start to continue."
+        )
+    else:
+        keyboard = [
+            [InlineKeyboardButton("📢 Join Channel", url=force_join_link)],
+            [InlineKeyboardButton("🔄 Try Again", callback_data="verify_join")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "❌ *You haven't joined the channel yet!*\n\n"
+            "Please join the channel first, then click Verify again.",
+            reply_markup=reply_markup
+        )
 
 def can_user_like(uid):
     if is_admin(uid):
@@ -156,6 +217,7 @@ async def reply(update, text):
 # ============ USER COMMANDS ============
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_non_admin_private(update): return
+    if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 *Bot is currently OFF*")
         return
@@ -221,6 +283,7 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_non_admin_private(update): return
+    if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 *Bot is currently OFF*")
         return
@@ -461,7 +524,83 @@ async def set_api_100(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Now send `/like BD UID`")
 
 
-async def set_api_max(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ============ FORCE JOIN COMMANDS ============
+async def setforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    global force_join, force_join_channel, force_join_link
+    if len(context.args) < 1:
+        await reply(update, "❌ Usage:\n`/setforcejoin <channel_username_or_id> <invite_link>`\n\nExample:\n`/setforcejoin @yourchannel https://t.me/+xxxxx`\n\nTo enable: add both. For private invite links, use the link + also set channel id if possible.")
+        return
+    channel = context.args[0]
+    link = context.args[1] if len(context.args) > 1 else force_join_link
+    force_join_channel = channel
+    force_join_link = link
+    force_join = True
+    save_all()
+    await reply(update,
+               f"✅ *Force Join Enabled*\n\n"
+               f"📢 Channel: `{channel}`\n"
+               f"🔗 Link: {link}\n\n"
+               f"Users must join to use bot.")
+
+
+async def removeforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    global force_join, force_join_channel, force_join_link
+    force_join = False
+    force_join_channel = ""
+    force_join_link = ""
+    save_all()
+    await reply(update, "✅ *Force Join Disabled*\n\nAll users can use the bot now.")
+
+
+async def forcejoinstatus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    status = "✅ Enabled" if force_join else "❌ Disabled"
+    await reply(update,
+               f"📊 *Force Join Status*\n\n"
+               f"Status: {status}\n"
+               f"Channel: `{force_join_channel or 'Not set'}`\n"
+               f"Link: {force_join_link or 'Not set'}")
+
+
+async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    if not force_join or not force_join_link:
+        await query.edit_message_text("✅ Force join is disabled. You can use the bot now.")
+        return
+    if is_admin(user_id):
+        await query.edit_message_text("✅ Admin verified. You can use the bot now.")
+        return
+    try:
+        if await is_user_member(context, user_id):
+            await query.edit_message_text(
+                "✅ *Verification Successful!*\n\n"
+                "You can now use the bot.\n"
+                "Send /start or /like to continue."
+            )
+            return
+    except Exception:
+        pass
+    keyboard = [
+        [InlineKeyboardButton("📢 Join Group", url=force_join_link)],
+        [InlineKeyboardButton("✅ I Joined - Verify", callback_data="verify_join")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        "❌ *Verification Failed*\n\n"
+        "Make sure you joined the group/channel, then click 'I Joined - Verify' again.\n\n"
+        "If you already joined, wait a moment and try again.",
+        reply_markup=reply_markup
+    )
     """MAX mode (240 tokens per request)."""
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
@@ -532,6 +671,10 @@ def main():
     app.add_handler(CommandHandler("setapi100", set_api_100))
     app.add_handler(CommandHandler("setapimax", set_api_max))
     app.add_handler(CommandHandler("maxff", set_api_max))
+    app.add_handler(CommandHandler("setforcejoin", setforcejoin))
+    app.add_handler(CommandHandler("removeforcejoin", removeforcejoin))
+    app.add_handler(CommandHandler("forcejoinstatus", forcejoinstatus))
+    app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
     app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
     
     print("🤖 Bot is running...")
