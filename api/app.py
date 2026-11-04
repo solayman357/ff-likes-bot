@@ -34,7 +34,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # -------------------------------
 # AUTO JWT REFRESH CONFIGURATION
 # -------------------------------
-JWT_REFRESH_MINUTES = 60  # Refresh tokens every 60 minutes
+JWT_REFRESH_MINUTES = 240  # Refresh tokens every 4 hours
 AUTO_REFRESH_ENABLED = True  # Set to False to disable auto refresh
 
 def fetch_jwt_from_api(uid, password, api_url):
