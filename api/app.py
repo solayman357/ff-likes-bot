@@ -32,6 +32,118 @@ TOKEN_FILES = ["token_bd_1.json", "token_bd_2.json"]
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # -------------------------------
+# AUTO JWT REFRESH CONFIGURATION
+# -------------------------------
+JWT_REFRESH_MINUTES = 60  # Refresh tokens every 60 minutes
+AUTO_REFRESH_ENABLED = True  # Set to False to disable auto refresh
+
+def fetch_jwt_from_api(uid, password, api_url):
+    """Fetch fresh JWT token from JWT API"""
+    try:
+        encoded_pwd = urllib.parse.quote(password, safe='')
+        url = f"{api_url}?uid={uid}&password={encoded_pwd}"
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            token = None
+            if isinstance(data, dict):
+                if 'token' in data:
+                    token = data['token']
+                elif 'access_token' in data:
+                    token = data['access_token']
+                elif 'data' in data and isinstance(data['data'], dict):
+                    if 'token' in data['data']:
+                        token = data['data']['token']
+            if token:
+                return {"token": token}
+    except Exception as e:
+        print(f"JWT fetch error for {uid}: {e}")
+    return None
+
+def refresh_all_tokens():
+    """Fetch fresh JWT tokens from JWT API for all accounts"""
+    print("🔄 Starting auto JWT refresh...")
+    
+    # Load accounts from account files
+    accounts = []
+    for fname in ["account_bd.txt", "account_ind.txt"]:
+        if os.path.exists(fname):
+            with open(fname, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    if ':' in line:
+                        parts = line.split(':', 1)
+                        uid = parts[0].strip()
+                        pwd = parts[1].strip()
+                        if uid and pwd and uid.isdigit():
+                            accounts.append({"uid": uid, "password": pwd})
+    
+    if not accounts:
+        print("❌ No accounts found for JWT refresh")
+        return
+    
+    print(f"📊 Found {len(accounts)} accounts for JWT refresh")
+    
+    # Fetch tokens from JWT API
+    new_tokens = []
+    for acc in accounts:
+        token_dict = None
+        for api_url in JWT_API_URLS:
+            token_dict = fetch_jwt_from_api(acc['uid'], acc['password'], api_url)
+            if token_dict:
+                break
+        
+        if token_dict:
+            new_tokens.append(token_dict)
+    
+    # Save new tokens to token_bd_1.json
+    if new_tokens:
+        # Load existing tokens
+        existing_tokens = []
+        try:
+            with open("token_bd_1.json", "r") as f:
+                existing_tokens = json.load(f)
+        except Exception:
+            existing_tokens = []
+        
+        existing_token_strings = set(t.get("token") for t in existing_tokens if isinstance(t, dict) and "token" in t)
+        
+        added = 0
+        for token_entry in new_tokens:
+            token = token_entry.get("token")
+            if token and token not in existing_token_strings:
+                existing_tokens.append(token_entry)
+                existing_token_strings.add(token)
+                added += 1
+        
+        with open("token_bd_1.json", "w") as f:
+            json.dump(existing_tokens, f, indent=2)
+        
+        print(f"✅ Auto JWT refresh: Added {added} new tokens. Total: {len(existing_tokens)}")
+    else:
+        print("❌ No new JWT tokens fetched")
+
+def auto_refresh_job():
+    """Background job to refresh JWT tokens periodically"""
+    while True:
+        try:
+            refresh_all_tokens()
+        except Exception as e:
+            print(f"❌ Auto refresh error: {e}")
+        time.sleep(JWT_REFRESH_MINUTES * 60)  # Wait before next refresh
+
+def start_auto_refresh():
+    """Start the auto refresh background thread"""
+    if AUTO_REFRESH_ENABLED:
+        thread = threading.Thread(target=auto_refresh_job, daemon=True)
+        thread.start()
+        print("🔄 Auto JWT refresh thread started (every {} min)".format(JWT_REFRESH_MINUTES))
+    else:
+        print("⚠️ Auto JWT refresh is disabled")
+
+# -------------------------------
 # STATE (Vercel is stateless → /tmp ব্যবহার)
 # -------------------------------
 STATE_FILE = "/tmp/token_usage_state.json"
@@ -440,4 +552,5 @@ def token_info():
 
 
 if __name__ == '__main__':
+    start_auto_refresh()
     app.run(host='0.0.0.0', port=5000)
