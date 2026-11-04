@@ -250,6 +250,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # ============ USER COMMANDS ============
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command."""
+    if await block_non_admin_private(update): return
     if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 Bot is currently OFF")
@@ -268,6 +270,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply(update, msg)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await block_non_admin_private(update): return
     if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 Bot is OFF")
@@ -291,6 +294,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply(update, msg)
 
 async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await block_non_admin_private(update): return
     if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 Bot is OFF")
@@ -316,6 +320,7 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /like REGION UID command."""
+    if await block_non_admin_private(update): return
     if not await force_join_check(update, context):
         return
     if bot_status == "off":
