@@ -45,8 +45,8 @@ daily_stats = {}
 user_limits = {}
 daily_limit = 2
 like_tokens = 240          # tokens per /like request (mode)
-force_join = True
-force_join_channel = "@"
+force_join = False
+force_join_channel = ""
 force_join_link = "https://t.me/+k4aq8eU9tYw1MTU1"
 
 # ============ HELPER FUNCTIONS ============
@@ -68,11 +68,11 @@ def load_data():
             bot_mode = cfg.get('mode', 'public')
             daily_limit = cfg.get('limit', 2)
             like_tokens = int(cfg.get('like_tokens', 240))
-            force_join = cfg.get('force_join', True)
-            force_join_channel = cfg.get('force_join_channel', '@')
+            force_join = cfg.get('force_join', False)
+            force_join_channel = cfg.get('force_join_channel', '')
             force_join_link = cfg.get('force_join_link', 'https://t.me/+k4aq8eU9tYw1MTU1')
     except:
-        bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channel, force_join_link = 'on', 'public', 2, 240, True, '@', 'https://t.me/+k4aq8eU9tYw1MTU1'
+        bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channel, force_join_link = 'on', 'public', 2, 240, False, '', 'https://t.me/+k4aq8eU9tYw1MTU1'
 
 def save_all():
     with open(DATA_FILES['allowed'], 'w') as f: json.dump(allowed_groups, f, indent=2)
