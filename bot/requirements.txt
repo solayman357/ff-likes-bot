@@ -2,5 +2,5 @@ requests
 python-telegram-bot
 apscheduler
 aiohttp
-protobuf
+protobuf>=5.27.0
 googleapis-common-protos
