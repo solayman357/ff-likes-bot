@@ -222,7 +222,27 @@ async def block_non_admin_private(update: Update) -> bool:
     return False
 
 async def reply(update, text):
-    await update.message.reply_text(text, parse_mode='Markdown')
+    try:
+        await update.message.reply_text(text, parse_mode='Markdown')
+    except Exception:
+        try:
+            await update.message.reply_text(text)
+        except Exception as e:
+            print(f"Reply failed: {e}", flush=True)
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log errors and notify user."""
+    print(f"Exception while handling update: {context.error}", flush=True)
+    import traceback
+    traceback.print_exc()
+    try:
+        if hasattr(update, 'effective_message') and update.effective_message:
+            await update.effective_message.reply_text(
+                "❌ *Something went wrong.* Please try again later.", parse_mode='Markdown'
+            )
+    except Exception:
+        pass
 
 # ============ USER COMMANDS ============
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -727,6 +747,7 @@ def main():
         app.add_handler(CommandHandler("forcejoinstatus", forcejoinstatus))
         app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
         app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
+        app.add_error_handler(error_handler)
 
         print("🤖 Bot is running...", flush=True)
         print("   → Normal users: only in groups, daily limit applies", flush=True)
