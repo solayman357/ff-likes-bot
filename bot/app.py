@@ -841,7 +841,7 @@ def start_health_server():
 
 
 # ============ MAIN ============
-def main():
+async def main():
     # Start health server first so Render can reach us even if polling is down
     try:
         start_health_server()
@@ -890,21 +890,39 @@ def main():
         print("   → Normal users: only in groups, daily limit applies", flush=True)
         print("   → Admin users: anywhere (DM + groups), unlimited likes", flush=True)
 
+        # Test bot identity before polling
+        try:
+            bot_info = await app.bot.get_me()
+            print(f"✅ Bot identity confirmed: @{bot_info.username} (id={bot_info.id})", flush=True)
+        except Exception as e:
+            print(f"❌ Failed to get bot info: {e}", flush=True)
+
+        # Delete any existing webhook to avoid conflicts
+        try:
+            await app.bot.delete_webhook(drop_pending_updates=True)
+            print("🗑️ Deleted existing webhook, dropped pending updates", flush=True)
+        except Exception as e:
+            print(f"⚠️ Failed to delete webhook: {e}", flush=True)
+
         # Polling loop with auto-restart on failure
+        print("🚀 Starting polling...", flush=True)
         while True:
             try:
-                app.run_polling()
+                print("📡 Starting polling...", flush=True)
+                await app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
             except Exception as e:
+                import traceback
                 print(f"❌ Polling error: {e}", flush=True)
+                traceback.print_exc()
                 print("🔄 Restarting polling in 5 seconds...", flush=True)
-                time.sleep(5)
+                await asyncio.sleep(5)
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
         traceback.print_exc()
         # Keep process alive so health server can still respond
         while True:
-            time.sleep(60)
+            await asyncio.sleep(60)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
