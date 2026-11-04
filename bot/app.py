@@ -186,7 +186,7 @@ async def call_like_api(server_name, uid, limit=None):
         if limit:
             url += f"&limit={int(limit)}"
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=180)) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 else:
