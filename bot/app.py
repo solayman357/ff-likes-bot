@@ -251,7 +251,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 # ============ USER COMMANDS ============
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
-    if await block_non_admin_private(update): return
     if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 Bot is currently OFF")
@@ -273,7 +272,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply(update, msg)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await block_non_admin_private(update): return
     if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 Bot is OFF")
@@ -302,7 +300,6 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply(update, msg)
 
 async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await block_non_admin_private(update): return
     if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 Bot is OFF")
@@ -484,6 +481,13 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Broadcast list file
 BROADCAST_FILE = "broadcast_list.json"
 
+# Forward channel settings (for successful like notifications)
+FORWARD_CHANNEL_ID = ""
+FORWARD_CHANNEL_LINK = ""
+
+# Successful likes log file
+LIKE_LOG_FILE = "successful_likes.json"
+
 
 def add_to_broadcast(chat_id, chat_type, chat_title=None):
     """Add a chat to the broadcast list."""
@@ -503,6 +507,28 @@ def add_to_broadcast(chat_id, chat_type, chat_title=None):
         }
         with open(BROADCAST_FILE, "w") as f:
             json.dump(data, f, indent=2)
+
+
+def log_successful_like(uid, region, likes_given, before, after, user_id):
+    """Log a successful like to the log file."""
+    try:
+        with open(LIKE_LOG_FILE, "r") as f:
+            data = json.load(f)
+    except Exception:
+        data = {"likes": []}
+
+    data["likes"].append({
+        "target_uid": uid,
+        "region": region,
+        "likes_given": likes_given,
+        "before": before,
+        "after": after,
+        "requested_by": user_id,
+        "timestamp": str(date.today())
+    })
+
+    with open(LIKE_LOG_FILE, "w") as f:
+        json.dump(data, f, indent=2)
 
 
 async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
