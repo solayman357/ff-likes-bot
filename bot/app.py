@@ -179,7 +179,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     msg = (
         "📖 *𝑪𝑶𝑴𝑴𝑨𝑵𝑫 𝑳𝑰𝑺𝑻*\n\n"
-        "🔹 `/like REGION UID` – Send 1 like (any region)\n"
+        "🔹 `/like REGION UID` – Send likes\n"
         "🔹 `/info` – Check your remaining likes\n"
         "🔹 `/start` – Welcome message\n\n"
         "*Example:* `/like BD UID`\n"
@@ -189,7 +189,9 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/off` / `/on` – Turn bot off/on\n"
         "`/stats` – Today's usage\n"
         "`/setprivate` / `/setpublic` – Change group mode\n"
-        "`/setlimit <num>` – Set daily limit per user"
+        "`/setlimit <num>` – Set daily limit per user\n"
+        "`/setapi100` – Set to 100 tokens (~100–110 likes)\n"
+        "`/setapimax` or `/maxff` – Set to 240 tokens (max)"
     )
     await reply(update, msg)
 
