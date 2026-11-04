@@ -11,13 +11,17 @@ from datetime import datetime, date
 from datetime import time as datetime_time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from github_persistence import init_github_persistence, get_github_persistence
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 from telegram.request import HTTPXRequest
 from telegram.error import BadRequest, NetworkError, RetryAfter, TelegramError
 
 # Protobuf imports (local copies for Render deployment)
 import uid_generator_pb2  # noqa: E402
+
+# Add parent directory to sys.path for github_persistence module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from github_persistence import init_github_persistence, get_github_persistence
 
 # ============ CONFIGURATION ============
 API_URL = os.getenv("API_URL", "http://127.0.0.1:5000")
@@ -53,7 +57,13 @@ force_join = False
 force_join_channels = []
 force_join_links = {}
 
-# Forward channel for successful likes
+forward_channel_id = ""
+forward_channel_link = ""
+
+# GitHub persistence
+github_persistence = None
+
+# ============ HELPER FUNCTIONS ============
 forward_channel_id = ""
 forward_channel_link = ""
 
