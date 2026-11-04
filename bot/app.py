@@ -289,7 +289,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/setprivate` / `/setpublic` – Change group mode\n"
         "`/setlimit <num>` – Set daily limit per user\n"
         "`/setapi100` – Set to 100 tokens (~100–110 likes)\n"
-        "`/setapimax` or `/maxff` – Set to 240 tokens (max)"
+        "`/setapi <num>` – Set custom tokens (10–400)\n"
+        "`/setapimax` or `/maxff` – Set to 400 tokens (max)"
     )
     await reply(update, msg)
 
@@ -720,18 +721,41 @@ async def set_api_100(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def set_api_max(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """MAX mode (240 tokens per request)."""
+    """MAX mode (400 tokens per request)."""
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
     global like_tokens
-    like_tokens = 240
+    like_tokens = 400
     save_all()
     await reply(update,
                 "✅ *MAX FF mode ON*\n\n"
-                "🔢 Tokens per request: `240`\n"
-                "❤️ Likes: as many as the 240 tokens can give\n\n"
+                "🔢 Tokens per request: `400`\n"
+                "❤️ Likes: as many as the 400 tokens can give\n\n"
                 "Now send `/like BD UID`")
+
+
+async def set_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set custom token count per request."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    if len(context.args) != 1 or not context.args[0].isdigit():
+        await reply(update, "❌ Usage: `/setapi <number>`\nExample: `/setapi 111`\nMax: 400")
+        return
+    global like_tokens
+    tokens = int(context.args[0])
+    if tokens < 10:
+        tokens = 10
+    elif tokens > 400:
+        tokens = 400
+    like_tokens = tokens
+    save_all()
+    await reply(update,
+                f"✅ *API Custom Mode ON*\n\n"
+                f"🔢 Tokens per request: `{tokens}`\n"
+                f"❤️ Expected likes: ~{tokens}\n\n"
+                f"Now send `/like BD UID`")
 
 
 # ============ RENDER HEALTH SERVER (free web_service must bind $PORT) ============
@@ -805,6 +829,7 @@ def main():
         app.add_handler(CommandHandler("setpublic", set_public))
         app.add_handler(CommandHandler("setlimit", set_limit))
         app.add_handler(CommandHandler("setapi100", set_api_100))
+        app.add_handler(CommandHandler("setapi", set_api))
         app.add_handler(CommandHandler("setapimax", set_api_max))
         app.add_handler(CommandHandler("maxff", set_api_max))
         app.add_handler(CommandHandler("setforcejoin", setforcejoin))
