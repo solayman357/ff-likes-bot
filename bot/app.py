@@ -904,7 +904,7 @@ def start_health_server():
 
 
 # ============ MAIN ============
-async def main():
+def main():
     # Start health server first so Render can reach us even if polling is down
     try:
         start_health_server()
@@ -955,14 +955,14 @@ async def main():
 
         # Test bot identity before polling
         try:
-            bot_info = await app.bot.get_me()
+            bot_info = app.bot.get_me()
             print(f"✅ Bot identity confirmed: @{bot_info.username} (id={bot_info.id})", flush=True)
         except Exception as e:
             print(f"❌ Failed to get bot info: {e}", flush=True)
 
         # Delete any existing webhook to avoid conflicts
         try:
-            await app.bot.delete_webhook(drop_pending_updates=True)
+            app.bot.delete_webhook(drop_pending_updates=True)
             print("🗑️ Deleted existing webhook, dropped pending updates", flush=True)
         except Exception as e:
             print(f"⚠️ Failed to delete webhook: {e}", flush=True)
@@ -988,4 +988,4 @@ async def main():
             time.sleep(60)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
