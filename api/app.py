@@ -98,32 +98,58 @@ def refresh_all_tokens():
         if token_dict:
             new_tokens.append(token_dict)
     
-    # Save new tokens to token_bd_1.json
-    if new_tokens:
-        # Load existing tokens
+    print(f"🔑 Fetched {len(new_tokens)} new tokens from JWT API")
+    
+    # Load existing tokens
+    existing_tokens = []
+    try:
+        with open("token_bd_1.json", "r") as f:
+            existing_tokens = json.load(f)
+    except Exception:
         existing_tokens = []
+    
+    # Remove expired tokens from existing bank
+    now = time.time()
+    valid_existing = []
+    expired_count = 0
+    for entry in existing_tokens:
+        token = entry.get("token", "") if isinstance(entry, dict) else entry
+        if not isinstance(token, str) or token.count('.') != 2:
+            expired_count += 1
+            continue
         try:
-            with open("token_bd_1.json", "r") as f:
-                existing_tokens = json.load(f)
+            payload = token.split('.')[1] + '=' * (-len(token.split('.')[1]) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+            exp = int(claims.get('exp', 0))
+            if exp > now:
+                valid_existing.append(entry)
+            else:
+                expired_count += 1
         except Exception:
-            existing_tokens = []
-        
-        existing_token_strings = set(t.get("token") for t in existing_tokens if isinstance(t, dict) and "token" in t)
-        
-        added = 0
-        for token_entry in new_tokens:
-            token = token_entry.get("token")
-            if token and token not in existing_token_strings:
-                existing_tokens.append(token_entry)
-                existing_token_strings.add(token)
-                added += 1
-        
+            expired_count += 1
+    
+    print(f"🗑️ Removed {expired_count} expired tokens from bank")
+    print(f"✅ Kept {len(valid_existing)} valid existing tokens")
+    
+    # Add only new unique unexpired tokens
+    existing_token_strings = set(t.get("token") for t in valid_existing if isinstance(t, dict) and "token" in t)
+    
+    added = 0
+    for token_entry in new_tokens:
+        token = token_entry.get("token")
+        if token and token not in existing_token_strings:
+            valid_existing.append(token_entry)
+            existing_token_strings.add(token)
+            added += 1
+    
+    # Save updated token bank
+    if added > 0 or expired_count > 0:
         with open("token_bd_1.json", "w") as f:
-            json.dump(existing_tokens, f, indent=2)
+            json.dump(valid_existing, f, indent=2)
         
-        print(f"✅ Auto JWT refresh: Added {added} new tokens. Total: {len(existing_tokens)}")
+        print(f"✅ Auto JWT refresh: Added {added} new tokens, Removed {expired_count} expired tokens. Total: {len(valid_existing)}")
     else:
-        print("❌ No new JWT tokens fetched")
+        print(f"ℹ️ Auto JWT refresh: No changes needed. Total: {len(valid_existing)}")
 
 def auto_refresh_job():
     """Background job to refresh JWT tokens periodically"""
