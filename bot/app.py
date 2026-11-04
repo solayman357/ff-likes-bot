@@ -217,18 +217,15 @@ async def block_non_admin_private(update: Update) -> bool:
     chat_type = update.effective_chat.type
     user_id = update.effective_user.id
     if chat_type == "private" and not is_admin(user_id):
-        await update.message.reply_text("🚫 *Bot works only in groups!*\n(Admins can use in private)", parse_mode='Markdown')
+        await update.message.reply_text("🚫 *Bot works only in groups!*\n(Admins can use in private)")
         return True
     return False
 
 async def reply(update, text):
     try:
-        await update.message.reply_text(text, parse_mode='Markdown')
-    except Exception:
-        try:
-            await update.message.reply_text(text)
-        except Exception as e:
-            print(f"Reply failed: {e}", flush=True)
+        await update.message.reply_text(text)
+    except Exception as e:
+        print(f"Reply failed: {e}", flush=True)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -239,17 +236,16 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     try:
         if hasattr(update, 'effective_message') and update.effective_message:
             await update.effective_message.reply_text(
-                "❌ *Something went wrong.* Please try again later.", parse_mode='Markdown'
+                "❌ Something went wrong. Please try again later."
             )
     except Exception:
         pass
 
 # ============ USER COMMANDS ============
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await block_non_admin_private(update): return
     if not await force_join_check(update, context): return
     if bot_status == "off":
-        await reply(update, "🔴 *Bot is currently OFF*")
+        await reply(update, "🔴 Bot is currently OFF")
         return
     msg = (
         "✨ *𝑭𝑹𝑬𝑬 𝑭𝑰𝑹𝑬 𝑳𝑰𝑲𝑬 𝑩𝑶𝑻* ✨\n"
@@ -265,7 +261,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply(update, msg)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await block_non_admin_private(update): return
+    if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 Bot is OFF")
         return
@@ -288,7 +284,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply(update, msg)
 
 async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await block_non_admin_private(update): return
+    if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 Bot is OFF")
         return
@@ -302,17 +298,17 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remaining = daily_limit - used
     msg = (
         "🤖 *𝑩𝑶𝑻 𝑰𝑵𝑭𝑶*\n\n"
-        f"⚙️ Mode: `{bot_mode.upper()}`\n"
-        f"🟢 Status: `{bot_status.upper()}`\n"
-        f"📅 Daily limit: `{daily_limit}` likes\n"
-        f"✅ Used today: `{used}`\n"
-        f"🟢 Remaining: `{remaining}`\n"
-        f"👥 Allowed groups: `{len(allowed_groups)}`"
+        f"⚙️ Mode: {bot_mode.upper()}\n"
+        f"🟢 Status: {bot_status.upper()}\n"
+        f"📅 Daily limit: {daily_limit} likes\n"
+        f"✅ Used today: {used}\n"
+        f"🟢 Remaining: {remaining}\n"
+        f"👥 Allowed groups: {len(allowed_groups)}"
     )
     await reply(update, msg)
 
 async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await block_non_admin_private(update): return
+    if not await force_join_check(update, context): return
     if not await force_join_check(update, context): return
     if bot_status == "off":
         await reply(update, "🔴 *Bot is currently OFF*")
@@ -341,30 +337,30 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     proc_msg = await update.message.reply_text(
-        f"🔄 *Processing...*\nUID: `{uid}`\nRegion: `{region}`\n🔢 Tokens: `{like_tokens}`",
-        parse_mode='Markdown')
+        f"🔄 Processing...\nUID: {uid}\nRegion: {region}\n🔢 Tokens: {like_tokens}"
+    )
     data = await call_like_api(region, uid, like_tokens)
     
     if data is None or "error" in data:
         error_msg = data.get("error", "Unknown error") if data else "No response"
         if data and data.get("status") == 4:
-            await proc_msg.edit_text(f"🔑 *Token Bank Error*\n{error_msg}", parse_mode='Markdown')
+            await proc_msg.edit_text(f"🔑 *Token Bank Error*\n{error_msg}")
         else:
-            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}\nPlease try again later.", parse_mode='Markdown')
+            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}\nPlease try again later.")
         return
     
     # Handle error responses from ZIP API
     if data.get("error"):
         error_msg = data.get("error", "Unknown error")
         if data.get("status") == 0:
-            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}\nPlease try again later.", parse_mode='Markdown')
+            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}\nPlease try again later.")
         else:
-            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}", parse_mode='Markdown')
+            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}")
         return
 
     status = data.get('status')
     if status is None:
-        await proc_msg.edit_text("❌ *Invalid API response*\nThe server returned an unexpected format.", parse_mode='Markdown')
+        await proc_msg.edit_text("❌ *Invalid API response*\nThe server returned an unexpected format.")
         return
 
     player = data.get('PlayerNickname', 'Unknown')
@@ -405,7 +401,7 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         result = f"❓ *Unknown API response*\nStatus code: {status}\nPlease contact the bot admin."
     
-    await proc_msg.edit_text(result, parse_mode='Markdown')
+    await proc_msg.edit_text(result)
 
 # ============ JWT TOKEN UPLOAD HANDLER ============
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
