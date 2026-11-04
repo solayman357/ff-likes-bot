@@ -149,6 +149,9 @@ async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=reply_markup
         )
 
+def is_admin(uid): return uid in ADMIN_IDS
+def today_str(): return str(date.today())
+
 def can_user_like(uid):
     if is_admin(uid):
         return True
