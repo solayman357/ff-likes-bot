@@ -979,7 +979,7 @@ def main():
         # Ignore stickers silently - don't reply to stickers
         async def ignore_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
-        app.add_handler(MessageHandler(filters.Sticker, ignore_sticker))
+        app.add_handler(MessageHandler(filters.Sticker.ALL, ignore_sticker))
         app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
         app.add_error_handler(error_handler)
 
