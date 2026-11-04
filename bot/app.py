@@ -99,20 +99,28 @@ async def force_join_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if is_admin(update.effective_user.id):
         return True
     user_id = update.effective_user.id
-    if await is_user_member(context, user_id):
-        return True
+    try:
+        if await is_user_member(context, user_id):
+            return True
+    except Exception as e:
+        print(f"Force join check error: {e}")
+        # If we can't check (private channel/bot not admin), be lenient and ask to verify
+        pass
     keyboard = [
         [InlineKeyboardButton("📢 Join Group", url=force_join_link)],
         [InlineKeyboardButton("✅ I Joined - Verify", callback_data="verify_join")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await reply(update,
-               "⚠️ *Force Join Required*\n\n"
-               "You must join our group to use this bot!\n\n"
-               "1️⃣ Click 'Join Group' and join\n"
-               "2️⃣ Come back and click 'I Joined - Verify'\n\n"
-               "Bot will verify automatically.",
-               reply_markup)
+    try:
+        await reply(update,
+                   "⚠️ *Force Join Required*\n\n"
+                   "You must join our group to use this bot!\n\n"
+                   "1️⃣ Click 'Join Group' and join\n"
+                   "2️⃣ Come back and click 'I Joined - Verify'\n\n"
+                   "After joining click verify to continue.",
+                   reply_markup)
+    except Exception as e:
+        print(f"Force join reply error: {e}")
     return False
 
 
@@ -589,7 +597,13 @@ async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return
     except Exception:
-        pass
+        # Can't check membership (bot not admin / private) - allow if they clicked verify after joining
+        await query.edit_message_text(
+            "✅ *Verified!*\n\n"
+            "You can now use the bot.\n"
+            "Send /start or /like to continue."
+        )
+        return
     keyboard = [
         [InlineKeyboardButton("📢 Join Group", url=force_join_link)],
         [InlineKeyboardButton("✅ I Joined - Verify", callback_data="verify_join")]
@@ -597,8 +611,7 @@ async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         "❌ *Verification Failed*\n\n"
-        "Make sure you joined the group/channel, then click 'I Joined - Verify' again.\n\n"
-        "If you already joined, wait a moment and try again.",
+        "Join the group first, then click 'I Joined - Verify'.",
         reply_markup=reply_markup
     )
     """MAX mode (240 tokens per request)."""
