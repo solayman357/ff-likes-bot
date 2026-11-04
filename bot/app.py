@@ -950,7 +950,7 @@ def main():
         # Ignore stickers silently - don't reply to stickers
         async def ignore_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
-        app.add_handler(MessageHandler(filters.STICKER, ignore_sticker))
+        app.add_handler(MessageHandler(filters.Sticker, ignore_sticker))
         app.add_error_handler(error_handler)
 
         print("🤖 Bot is running...", flush=True)
