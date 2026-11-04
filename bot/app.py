@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 from telegram.request import HTTPXRequest
+from telegram.error import BadRequest, NetworkError, RetryAfter, TelegramError
 
 # Protobuf imports (local copies for Render deployment)
 import uid_generator_pb2  # noqa: E402
@@ -308,59 +309,105 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply(update, msg)
 
 async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await force_join_check(update, context): return
-    if not await force_join_check(update, context): return
-    if bot_status == "off":
-        await reply(update, "🔴 *Bot is currently OFF*")
+    """Handle /like REGION UID command."""
+    if not await force_join_check(update, context):
         return
-    
+    if bot_status == "off":
+        await reply(update, "🔴 Bot is currently OFF")
+        return
+
     chat_id = update.effective_chat.id
     chat_type = update.effective_chat.type
     if chat_type != "private" and not is_group_allowed(chat_id, chat_type):
-        await reply(update, "🚫 *This bot works only in allowed groups!*")
+        await reply(update, "🚫 This bot works only in allowed groups!")
         return
-    
+
     if len(context.args) != 2:
-        await reply(update, "❌ *Usage:* `/like REGION UID`\nExample: `/like BD UID`")
+        await reply(update, "❌ Usage: /like REGION UID\nExample: /like BD UID")
         return
-    
+
     region = context.args[0].upper()
     uid = context.args[1]
     if not uid.isdigit():
-        await reply(update, "❌ *UID must contain only numbers!*")
+        await reply(update, "❌ UID must contain only numbers!")
         return
-    
+
     user_id = update.effective_user.id
     if not can_user_like(user_id):
         used = user_limits.get(str(user_id), {}).get('count', 0)
-        await reply(update, f"⚠️ *Daily limit reached!*\nYou have used `{used}/{daily_limit}` likes today.\n💡 Try again tomorrow.")
+        await reply(update, f"⚠️ Daily limit reached!\nYou have used `{used}/{daily_limit}` likes today.\n💡 Try again tomorrow.")
         return
-    
-    proc_msg = await update.message.reply_text(
-        f"🔄 Processing...\nUID: {uid}\nRegion: {region}\n🔢 Tokens: {like_tokens}"
-    )
+
+    # Send processing message (protected)
+    proc_msg = None
+    try:
+        proc_msg = await update.message.reply_text(
+            f"🔄 Processing...\nUID: {uid}\nRegion: {region}\n🔢 Tokens: {like_tokens}"
+        )
+    except (BadRequest, NetworkError, RetryAfter, TelegramError) as e:
+        import traceback
+        print(f"❌ Failed to send processing message in like_cmd: {e}", flush=True)
+        traceback.print_exc()
+        await reply(update, f"❌ Failed to start like request. Telegram error: {e}")
+        return
+    except Exception as e:
+        import traceback
+        print(f"❌ Unexpected error sending processing message: {e}", flush=True)
+        traceback.print_exc()
+        await reply(update, f"❌ Failed to start like request: {e}")
+        return
+
+    # Call the API
     data = await call_like_api(region, uid, like_tokens)
-    
+
+    # Helper to safely edit or fall back to new message
+    async def _respond(text, fallback_text=None):
+        """Try to edit proc_msg; if that fails, send a new message."""
+        if proc_msg is not None:
+            try:
+                await proc_msg.edit_text(text)
+                return
+            except (BadRequest, NetworkError, RetryAfter, TelegramError) as e:
+                import traceback
+                print(f"❌ Failed to edit processing message in like_cmd: {e}", flush=True)
+                traceback.print_exc()
+            except Exception as e:
+                import traceback
+                print(f"❌ Unexpected error editing processing message: {e}", flush=True)
+                traceback.print_exc()
+        # Fallback: send new message
+        try:
+            await update.message.reply_text(fallback_text or text)
+        except (BadRequest, NetworkError, RetryAfter, TelegramError) as e:
+            import traceback
+            print(f"❌ Failed to send fallback message in like_cmd: {e}", flush=True)
+            traceback.print_exc()
+        except Exception as e:
+            import traceback
+            print(f"❌ Unexpected error sending fallback message: {e}", flush=True)
+            traceback.print_exc()
+
+    # API returned an error
     if data is None or "error" in data:
         error_msg = data.get("error", "Unknown error") if data else "No response"
         if data and data.get("status") == 4:
-            await proc_msg.edit_text(f"🔑 *Token Bank Error*\n{error_msg}")
+            await _respond(f"🔑 Token Bank Error\n{error_msg}")
         else:
-            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}\nPlease try again later.")
+            await _respond(f"❌ API Error!\n{error_msg}\nPlease try again later.")
         return
-    
+
     # Handle error responses from ZIP API
     if data.get("error"):
         error_msg = data.get("error", "Unknown error")
         if data.get("status") == 0:
-            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}\nPlease try again later.")
+            await _respond(f"❌ API Error!\n{error_msg}\nPlease try again later.")
         else:
-            await proc_msg.edit_text(f"❌ *API Error!*\n{error_msg}")
+            await _respond(f"❌ API Error!\n{error_msg}")
         return
 
     status = data.get('status')
     if status is None:
-        await proc_msg.edit_text("❌ *Invalid API response*\nThe server returned an unexpected format.")
+        await _respond("❌ Invalid API response\nThe server returned an unexpected format.")
         return
 
     player = data.get('PlayerNickname', 'Unknown')
@@ -376,32 +423,32 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_user_like(user_id)
         user_used = user_limits.get(str(user_id), {}).get('count', 0) if not is_admin(user_id) else "Unlimited"
         result = (
-            f"✅ *𝑳𝑰𝑲𝑬 𝑺𝑬𝑵𝑻* ✅\n\n"
-            f"👤 *Player:* {player}\n"
-            f"🏷️ *UID:* `{uid_resp}`\n"
-            f"🌍 *Region:* {region_resp}\n"
-            f"⭐ *Level:* {level}\n\n"
-            f"❤️ *Likes given:* +{given}\n"
-            f"📊 *Total:* {before} → {after}\n\n"
-            f"📅 *Your usage:* {user_used}/{daily_limit if not is_admin(user_id) else '∞'}\n"
-            f"🎉 *Success!*"
+            f"✅ LIKE SENT ✅\n\n"
+            f"👤 Player: {player}\n"
+            f"🏷️ UID: {uid_resp}\n"
+            f"🌍 Region: {region_resp}\n"
+            f"⭐ Level: {level}\n\n"
+            f"❤️ Likes given: +{given}\n"
+            f"📊 Total: {before} → {after}\n\n"
+            f"📅 Your usage: {user_used}/{daily_limit if not is_admin(user_id) else '∞'}\n"
+            f"🎉 Success!"
         )
     elif status == 2:
         result = (
-            f"⚠️ *𝑳𝑰𝑴𝑰𝑻 𝑹𝑬𝑨𝑪𝑯𝑬𝑫* ⚠️\n\n"
-            f"👤 *Player:* {player}\n"
-            f"🏷️ *UID:* `{uid_resp}`\n"
-            f"🌍 *Region:* {region_resp}\n"
-            f"⭐ *Level:* {level}\n\n"
-            f"❌ *Likes sent:* 0\n"
-            f"📊 *Total likes:* {before} (unchanged)\n\n"
-            f"📅 *API remaining:* {api_rem}\n\n"
-            f"😔 *Could not send like to {player}*"
+            f"⚠️ LIMIT REACHED ⚠️\n\n"
+            f"👤 Player: {player}\n"
+            f"🏷️ UID: {uid_resp}\n"
+            f"🌍 Region: {region_resp}\n"
+            f"⭐ Level: {level}\n\n"
+            f"❌ Likes sent: 0\n"
+            f"📊 Total likes: {before} (unchanged)\n\n"
+            f"📅 API remaining: {api_rem}\n\n"
+            f"😔 Could not send like to {player}"
         )
     else:
-        result = f"❓ *Unknown API response*\nStatus code: {status}\nPlease contact the bot admin."
-    
-    await proc_msg.edit_text(result)
+        result = f"❓ Unknown API response\nStatus code: {status}\nPlease contact the bot admin."
+
+    await _respond(result)
 
 # ============ JWT TOKEN UPLOAD HANDLER ============
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
