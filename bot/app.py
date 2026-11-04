@@ -531,6 +531,54 @@ def log_successful_like(uid, region, likes_given, before, after, user_id):
         json.dump(data, f, indent=2)
 
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only command")
+        return
+
+    document = update.message.document
+    if not document:
+        await reply(update, "❌ No document found.")
+        return
+
+    file_name = document.file_name or ""
+    if not file_name.endswith(".json"):
+        await reply(update, "❌ Please upload a valid JSON file.")
+        return
+
+    try:
+        file = await context.bot.get_document(document.file_id)
+        file_bytes = await file.download_as_bytearray()
+
+        try:
+            new_tokens = json.loads(file_bytes.decode('utf-8'))
+        except Exception as e:
+            await reply(update, f"❌ Invalid JSON file: `{str(e)[:100]}`")
+            return
+
+        # Forward tokens to API's /upload-tokens endpoint
+        upload_url = f"{API_URL.rstrip('/')}/upload-tokens"
+        payload = {"tokens": new_tokens}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(upload_url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                result = await resp.json()
+
+        if resp.status == 200:
+            await reply(update,
+                f"✅ Token Update Complete\n\n"
+                f"✅ Added: {result.get('added', 0)}\n"
+                f"❌ Expired: {result.get('expired', 0)}\n"
+                f"📁 Total in bank: {result.get('total_in_bank', 0)}"
+            )
+        else:
+            error_msg = result.get("error", "Unknown error") if isinstance(result, dict) else str(result)
+            await reply(update, f"❌ API Error: `{error_msg}`")
+
+    except Exception as e:
+        await reply(update, f"❌ Error processing file: `{str(e)[:100]}`")
+
+
 async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Broadcast a message to all users and groups. Admin only."""
     if not is_admin(update.effective_user.id):
