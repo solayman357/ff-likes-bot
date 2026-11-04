@@ -7,7 +7,8 @@ import time
 import requests
 import aiohttp
 import asyncio
-from datetime import datetime, date, time
+from datetime import datetime, date
+from datetime import time as datetime_time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
@@ -615,6 +616,25 @@ async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         "Join the group first, then click 'I Joined - Verify'.",
         reply_markup=reply_markup
     )
+
+
+# ============ LIKE MODE COMMANDS ============
+async def set_api_100(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """100-token mode (~100-110 likes per request)."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    global like_tokens
+    like_tokens = 100
+    save_all()
+    await reply(update,
+                "✅ *API 100 mode ON*\n\n"
+                "🔢 Tokens per request: `100`\n"
+                "❤️ Expected likes: `~100-110`\n\n"
+                "Now send `/like BD UID`")
+
+
+async def set_api_max(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """MAX mode (240 tokens per request)."""
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
@@ -627,6 +647,7 @@ async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 "🔢 Tokens per request: `240`\n"
                 "❤️ Likes: as many as the 240 tokens can give\n\n"
                 "Now send `/like BD UID`")
+
 
 # ============ RENDER HEALTH SERVER (free web_service must bind $PORT) ============
 class _HealthHandler(BaseHTTPRequestHandler):
@@ -656,12 +677,12 @@ def start_health_server():
             server = HTTPServer(("0.0.0.0", try_port), _HealthHandler)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
-            print(f"🌐 Health server listening on 0.0.0.0:{try_port}")
+            print(f"🌐 Health server listening on 0.0.0.0:{try_port}", flush=True)
             return
         except Exception as e:
-            print(f"⚠️ Health server port {try_port} failed: {e}")
+            print(f"⚠️ Health server port {try_port} failed: {e}", flush=True)
             continue
-    print("❌ Health server could not bind to any port")
+    print("❌ Health server could not bind to any port", flush=True)
 
 
 # ============ MAIN ============
@@ -670,12 +691,12 @@ def main():
     try:
         start_health_server()
     except Exception as e:
-        print(f"❌ Health server failed: {e}")
+        print(f"❌ Health server failed: {e}", flush=True)
 
     try:
         load_data()
     except Exception as e:
-        print(f"❌ load_data failed: {e}")
+        print(f"❌ load_data failed: {e}", flush=True)
 
     # Build the Telegram application
     try:
@@ -684,8 +705,8 @@ def main():
 
         job_queue = app.job_queue
         if job_queue:
-            job_queue.run_daily(reset_midnight, time=time(hour=0, minute=0, second=0), days=tuple(range(7)))
-            print("⏰ Midnight reset scheduled")
+            job_queue.run_daily(reset_midnight, time=datetime_time(hour=0, minute=0, second=0), days=tuple(range(7)))
+            print("⏰ Midnight reset scheduled", flush=True)
 
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_cmd))
@@ -707,20 +728,20 @@ def main():
         app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
         app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
 
-        print("🤖 Bot is running...")
-        print("   → Normal users: only in groups, daily limit applies")
-        print("   → Admin users: anywhere (DM + groups), unlimited likes")
+        print("🤖 Bot is running...", flush=True)
+        print("   → Normal users: only in groups, daily limit applies", flush=True)
+        print("   → Admin users: anywhere (DM + groups), unlimited likes", flush=True)
 
         # Polling loop with auto-restart on failure
         while True:
             try:
                 app.run_polling()
             except Exception as e:
-                print(f"❌ Polling error: {e}")
-                print("🔄 Restarting polling in 5 seconds...")
+                print(f"❌ Polling error: {e}", flush=True)
+                print("🔄 Restarting polling in 5 seconds...", flush=True)
                 time.sleep(5)
     except Exception as e:
-        print(f"❌ Bot setup failed: {e}")
+        print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
         traceback.print_exc()
         # Keep process alive so health server can still respond
