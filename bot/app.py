@@ -3614,15 +3614,7 @@ def main():
         # Start polling — run_polling() manages its own event loop internally,
         # including bot identity check (get_me) and webhook deletion.
         print("🚀 Starting polling...", flush=True)
-
-        # Create a new event loop for the bot
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-
-        # Run the event loop forever
-        loop.run_forever()
+        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
@@ -3631,6 +3623,9 @@ def main():
         while True:
             time.sleep(60)
 
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
