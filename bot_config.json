@@ -3,7 +3,7 @@
   "mode": "private",
   "limit": 2,
   "like_tokens": 300,
-  "force_join": true,
+  "force_join": false,
   "force_join_channels": [
     "@FFLIKESPRO2",
     "@autolikespro",
