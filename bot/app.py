@@ -3502,7 +3502,7 @@ def start_health_server():
 
 
 # ============ MAIN ============
-def main():
+async def main():
     global github_persistence
     # Initialize GitHub persistence
     github_persistence = init_github_persistence()
@@ -3601,7 +3601,7 @@ def main():
         # filters.Document.ALL matches only documents (never stickers).
         app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         # Auto-register groups when bot is added; unregister when bot is removed/kicked.
-        app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
+        app.add_handler(ChatMemberHandler(my_chat_member_handler, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))
         app.add_error_handler(error_handler)
 
         # Set bot reference for announcements
@@ -3614,7 +3614,7 @@ def main():
         # Start polling — run_polling() manages its own event loop internally,
         # including bot identity check (get_me) and webhook deletion.
         print("🚀 Starting polling...", flush=True)
-        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        await app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
@@ -3624,6 +3624,8 @@ def main():
             time.sleep(60)
 
 
+if __name__ == "__main__":
+    asyncio.run(main())
 if __name__ == "__main__":
     main()
 if __name__ == "__main__":
