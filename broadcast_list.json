@@ -1,17 +1,4 @@
 {
-  "chats": {
-    "-1004374850616": {
-      "chat_id": -1004374850616,
-      "chat_type": "supergroup",
-      "title": "Likesㅤ booster",
-      "added_at": "2026-11-05"
-    },
-    "-1003910729190": {
-      "chat_id": -1003910729190,
-      "chat_type": "supergroup",
-      "title": "𝐒𝐀𝐌𝐈𝐑 𝕏 𝐋𝐈𝐊𝐄",
-      "added_at": "2026-11-05"
-    }
-  },
+  "chats": {},
   "users": {}
 }
