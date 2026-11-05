@@ -5,10 +5,12 @@
   "like_tokens": 400,
   "force_join": true,
   "force_join_channels": [
-    "channel-1"
+    "channel-1",
+    "channel-2"
   ],
   "force_join_links": {
-    "channel-1": "https://t.me/FFLIKESPRO2"
+    "channel-1": "https://t.me/FFLIKESPRO2",
+    "channel-2": "https://t.me/autolikespro"
   },
   "forward_channel_id": "@autolikespro",
   "forward_channel_link": "https://t.me/autolikespro"
