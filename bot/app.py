@@ -3615,7 +3615,7 @@ def main():
         # including bot identity check (get_me) and webhook deletion.
         print("🚀 Starting polling...", flush=True)
         
-        # Create a new event loop for polling
+        # Create a new event loop for the bot polling
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -3636,6 +3636,8 @@ def main():
             time.sleep(60)
 
 
+if __name__ == "__main__":
+    main()
 if __name__ == "__main__":
     main()
 if __name__ == "__main__":
