@@ -180,13 +180,44 @@ def _member_is_joined(member) -> bool:
     return False
 
 
+async def safe_edit_message(target, text: str, reply_markup=None, parse_mode: str = 'Markdown') -> bool:
+    """Edit a message safely. Returns True if edited, or if content was unchanged ('not modified').
+
+    Never raises — swallows 'Message is not modified' so tapping Verify again
+    with the same result never crashes the handler.
+    """
+    try:
+        await target.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        return True
+    except BadRequest as e:
+        if "Message is not modified" in str(e):
+            return True  # Same content as before — that's fine
+        print(f"⚠️ Edit message BadRequest: {e}", flush=True)
+        return False
+    except Exception as e:
+        print(f"⚠️ Edit message error: {e}", flush=True)
+        return False
+
+
 async def is_user_member_single(context: ContextTypes.DEFAULT_TYPE, user_id: int, channel: str) -> bool:
-    """Check membership in one channel. Errors are treated as 'not joined'."""
+    """Check membership in one channel. Returns True only if truly joined."""
     try:
         member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
-        return _member_is_joined(member)
+        joined = _member_is_joined(member)
+        if not joined:
+            print(f"🔍 getChatMember '{channel}' user={user_id}: status={getattr(member, 'status', '?')} → NOT joined", flush=True)
+        return joined
+    except BadRequest as e:
+        msg = str(e)
+        if "chat not found" in msg.lower():
+            print(f"❌ getChatMember '{channel}': chat not found — bot may not be in this channel or ID is wrong: {e}", flush=True)
+        elif "forbidden" in msg.lower() or "not an administrator" in msg.lower():
+            print(f"❌ getChatMember '{channel}': bot is not admin in this channel — cannot verify membership: {e}", flush=True)
+        else:
+            print(f"⚠️ getChatMember '{channel}' failed (BadRequest): {e}", flush=True)
+        return False
     except Exception as e:
-        print(f"⚠️ getChatMember failed for '{channel}': {e}", flush=True)
+        print(f"⚠️ getChatMember '{channel}' failed: {type(e).__name__}: {e}", flush=True)
         return False
 
 
@@ -224,7 +255,7 @@ async def force_join_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     text = FORCE_JOIN_TEXT
     try:
         if update.callback_query is not None:
-            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+            await safe_edit_message(update.callback_query, text, reply_markup=reply_markup)
         elif update.message is not None:
             await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     except Exception as e:
@@ -1131,43 +1162,65 @@ async def forcejoinoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
+    """Verify the user has joined ALL required force-join channels.
 
-    if is_admin(user_id):
-        await query.edit_message_text("✅ Admin verified. You can use the bot now.")
+    Never crashes the bot — every Telegram call is wrapped in try/except,
+    and 'Message is not modified' is safely ignored.
+    """
+    query = update.callback_query
+    try:
+        await query.answer()
+    except Exception as e:
+        print(f"⚠️ verify_join_callback: query.answer() failed: {e}", flush=True)
         return
 
+    user_id = query.from_user.id
+
+    # Admins always bypass force join
+    if is_admin(user_id):
+        await safe_edit_message(query, "✅ Admin verified. You can use the bot now.")
+        return
+
+    # If force join is disabled or no channels configured, allow access
     if not force_join or not force_join_channels:
-        await query.edit_message_text("✅ Force join is disabled. You can use the bot now.")
+        await safe_edit_message(query, "✅ Force join is disabled. You can use the bot now.")
         return
 
     # Always check real membership in EVERY channel. Never trust the click.
-    missing = await get_missing_channels(context, user_id)
+    try:
+        missing = await get_missing_channels(context, user_id)
+    except Exception as e:
+        print(f"❌ verify_join_callback: get_missing_channels failed: {e}", flush=True)
+        missing = list(force_join_channels)  # treat all as missing on error
+
     if not missing:
-        await query.edit_message_text(
+        # User joined every required channel
+        await safe_edit_message(
+            query,
             "✅ *Verification Successful!*\n\n"
             "You can now use the bot.\n"
             "Send /start or /like to continue.",
-            parse_mode='Markdown'
         )
         return
 
+    # Verification failed — show only the channels NOT yet joined
     missing_lines = "\n".join(f"• `{ch}`" for ch in missing)
-    await query.edit_message_text(
+    await safe_edit_message(
+        query,
         "❌ *Verification Failed*\n\n"
         "You still need to join:\n"
         f"{missing_lines}\n\n"
         "Join every channel above, then tap ✅ I'VE JOINED - VERIFY again.",
         reply_markup=build_force_join_keyboard(),
-        parse_mode='Markdown'
     )
 
 
 async def forcejoin_noop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer("No invite link is configured for this channel. Ask an admin.", show_alert=True)
+    try:
+        await query.answer("No invite link is configured for this channel. Ask an admin.", show_alert=True)
+    except Exception as e:
+        print(f"⚠️ forcejoin_noop_callback: {e}", flush=True)
 
 
 # ============ LIKE MODE COMMANDS ============
