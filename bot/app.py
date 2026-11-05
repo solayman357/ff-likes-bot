@@ -11,7 +11,7 @@ from datetime import datetime, date
 from datetime import time as datetime_time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler, TypeHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 from telegram.request import HTTPXRequest
 from telegram.error import BadRequest, NetworkError, RetryAfter, TelegramError
 
@@ -358,6 +358,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if bot_status == "off":
         await reply(update, "🔴 Bot is OFF")
         return
+    register_chat(update)
     msg = (
         "📖 *𝑪𝑶𝑴𝑴𝑨𝑵𝑫 𝑳𝑰𝑺𝑻*\n\n"
         "🔹 `/like REGION UID` – Send likes\n"
@@ -390,6 +391,7 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if bot_status == "off":
         await reply(update, "🔴 Bot is OFF")
         return
+    register_chat(update)
     uid = update.effective_user.id
     if is_admin(uid):
         await reply(update, "👑 *Admin Account*\n🔥 *Unlimited likes* – No daily limit.")
@@ -417,6 +419,7 @@ async def like_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if bot_status == "off":
         await reply(update, "🔴 Bot is currently OFF")
         return
+    register_chat(update)
 
     try:
         await _like_cmd_inner(update, context)
@@ -1306,8 +1309,6 @@ def main():
         app.add_handler(CommandHandler("broadcast", broadcast_cmd))
         app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
         app.add_handler(CallbackQueryHandler(forcejoin_noop_callback, pattern="^forcejoin_noop$"))
-        # Register every user/group that interacts with the bot (broadcast registry).
-        app.add_handler(TypeHandler(Update, register_update), group=-1)
         # Stick silences: stickers produce NO reply — not even "Admin only" / "No document".
         # filters.Document.ALL matches only documents (never stickers).
         app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
