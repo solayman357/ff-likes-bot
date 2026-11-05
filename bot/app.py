@@ -3502,7 +3502,7 @@ def start_health_server():
 
 
 # ============ MAIN ============
-async def main():
+def main():
     global github_persistence
     # Initialize GitHub persistence
     github_persistence = init_github_persistence()
@@ -3614,7 +3614,7 @@ async def main():
         # Start polling — run_polling() manages its own event loop internally,
         # including bot identity check (get_me) and webhook deletion.
         print("🚀 Starting polling...", flush=True)
-        await app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
@@ -3625,7 +3625,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
 if __name__ == "__main__":
     main()
 if __name__ == "__main__":
