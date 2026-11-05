@@ -1187,6 +1187,9 @@ async def is_user_member_single(context: ContextTypes.DEFAULT_TYPE, user_id: int
     Tries the stored channel identifier first. If that fails (e.g. placeholder
     name like "channel-1"), falls back to extracting the username from the
     stored invite link.
+    If get_chat_member fails for any reason (bot not admin, channel deleted,
+    etc.), we treat the user as joined to avoid blocking all users due to
+    invalid channel IDs.
     """
     # Try the stored channel identifier first
     try:
@@ -1210,16 +1213,16 @@ async def is_user_member_single(context: ContextTypes.DEFAULT_TYPE, user_id: int
                         print(f"🔍 getChatMember '{extracted}' user={user_id}: status={getattr(member, 'status', '?')} → NOT joined", flush=True)
                     return joined
                 except BadRequest as e2:
-                    print(f"❌ getChatMember '{extracted}' failed: {e2}", flush=True)
-                    return False
+                    print(f"⚠️ getChatMember '{extracted}' failed: {e2}", flush=True)
+                    return True  # Can't verify, treat as joined
                 except Exception as e2:
                     print(f"⚠️ getChatMember '{extracted}' failed: {type(e2).__name__}: {e2}", flush=True)
-                    return False
-        print(f"❌ getChatMember '{channel}': chat not found — bot may not be in this channel or ID is wrong: {e}", flush=True)
-        return False
+                    return True  # Can't verify, treat as joined
+        print(f"⚠️ getChatMember '{channel}' failed: {e}", flush=True)
+        return True  # Can't verify, treat as joined
     except Exception as e:
         print(f"⚠️ getChatMember '{channel}' failed: {type(e).__name__}: {e}", flush=True)
-        return False
+        return True  # Can't verify, treat as joined
 
 
 async def get_missing_channels(context: ContextTypes.DEFAULT_TYPE, user_id: int):
