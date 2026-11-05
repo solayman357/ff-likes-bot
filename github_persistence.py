@@ -1,317 +1,395 @@
 """
 GitHub Persistence Module for FF Likes Bot
-Provides automatic synchronization of all bot data with GitHub repository.
+==========================================
+
+Stores all runtime bot data permanently in the GitHub repository using the
+GitHub REST API on a dedicated data branch (default: ``bot-data``).
+
+Why a separate branch?
+    The Render service auto-deploys from ``main``. If runtime data were
+    committed to ``main``, every /start, /like or setting change would trigger
+    a redeploy (and a restart storm). The ``bot-data`` branch keeps runtime
+    data completely separate from source-code commits.
+
+Guarantees
+    * Never stores tokens, API keys or passwords (only the whitelisted data
+      files below are ever uploaded).
+    * Pulls the latest data on startup before the bot loads its settings.
+    * Pushes after every change, in a background worker, with retries.
+    * A failed GitHub call never crashes or blocks the bot.
+    * Concurrent writes are serialised with a lock.
 """
-import os
+
+import base64
 import json
+import logging
+import os
 import subprocess
 import threading
 import time
-import logging
+import urllib.parse
 from pathlib import Path
-from typing import Dict, Any, Optional, List
-from datetime import datetime
-from threading import Lock
-from contextlib import contextmanager
-from typing import Optional, List
+from typing import Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
+
+# Only these files are ever read from / written to GitHub.
+# key -> filename inside the bot directory
+PERSISTED_FILES: Dict[str, str] = {
+    "allowed": "allowed_groups.json",
+    "stats": "daily_stats.json",
+    "users": "user_limits.json",
+    "config": "bot_config.json",
+    "broadcast": "broadcast_list.json",
+    "likes": "successful_likes.json",
+}
+
+DEFAULT_REPO = "solayman357/ff-likes-bot"
+DEFAULT_BRANCH = "bot-data"
+API_ROOT = "https://api.github.com"
 
 
 class GitHubPersistence:
     """Manages GitHub-based persistence for all bot data."""
-    
-    # Files that should be persisted to GitHub
-    PERSISTED_FILES = {
-        'allowed_groups.json': 'allowed_groups.json',
-        'daily_stats.json': 'daily_stats.json',
-        'user_limits.json': 'user_limits.json',
-        'bot_config.json': 'bot_config.json',
-        'daily_stats.json': 'daily_stats.json',
-        'broadcast_list.json': 'broadcast_list.json',
-        'successful_likes.json': 'successful_likes.json',
-        'like_log.json': 'like_log.json',
-    }
-    
-    # Files that should NOT be committed (secrets, tokens, etc.)
-    EXCLUDED_FILES = {
-        'bot_config.json',  # Contains force_join settings but NOT tokens
-        # Note: bot_config.json DOES NOT contain tokens - only settings
-    }
-    
-    # Never commit these files
-    NEVER_COMMIT = {
-        'bot_config.json',  # Will be handled specially - only settings, no tokens
-        'tg_bot_config.json',
-        '*.pkl',
-        '*.log',
-        '.env*',
-        '*.key',
-        '*.pem',
-        '*.pem',
-        '*.key',
-        '.env*',
-        '*.token',
-        '*token*',
-        '*secret*',
-        '*password*',
-        '*.pem',
-        '*.key',
-        '*.crt',
-        '*.p12',
-        '*.pfx',
-        '*.jks',
-        '*.keystore',
-    }
-    
-    def __init__(self, repo_path: str = "/root/OWN-LIKE-BOT", bot_dir: str = "/root/OWN-LIKE-BOT/bot"):
-        self.repo_path = Path(repo_path)
-        self.bot_dir = Path(bot_dir)
-        self._lock = Lock()
-        self._push_queue: List[str] = []
-        self._push_lock = Lock()
-        self._push_thread: Optional[threading.Thread] = None
+
+    def __init__(self, repo_path: Optional[str] = None, bot_dir: Optional[str] = None):
+        self.repo_path = Path(repo_path) if repo_path else Path(__file__).resolve().parent
+        self.bot_dir = Path(bot_dir) if bot_dir else (self.repo_path / "bot")
+
+        self._lock = threading.RLock()
+        self._pending: Set[str] = set()
+        self._retry_count: Dict[str, int] = {}
+        self._worker: Optional[threading.Thread] = None
         self._running = False
+        self._branch_ready = False
         self._last_push = 0
-        self._push_interval = 30  # seconds
-        self._git_configured = False
-        self._init_git()
-        
-    def _init_git(self):
-        """Initialize git configuration for automated commits."""
+        self._last_error = ""
+
+        self.token = self._discover_token()
+        self.owner, self.repo = self._discover_repo()
+        self.branch = os.getenv("GITHUB_DATA_BRANCH", DEFAULT_BRANCH).strip() or DEFAULT_BRANCH
+        self.enabled = bool(self.token and self.owner and self.repo)
+
+        if self.enabled:
+            logger.info("GitHub persistence enabled for %s/%s (branch %s)",
+                        self.owner, self.repo, self.branch)
+        else:
+            logger.warning("GitHub persistence disabled (no token/repo found)")
+
+    # ------------------------------------------------------------------ setup
+    def _discover_token(self) -> str:
+        for key in ("GITHUB_TOKEN", "GH_TOKEN", "GITHUB_PAT"):
+            value = (os.getenv(key) or "").strip()
+            if value:
+                return value
+        # Fall back to a token embedded in the git remote URL (local dev only).
         try:
-            # Check if git is available
-            subprocess.run(['git', '--version'], check=True, capture_output=True)
-            
-            # Configure git user if not set
-            subprocess.run(['git', 'config', 'user.email', 'bot@ff-likes-bot.local'], 
-                         cwd=self.repo_path, check=False)
-            subprocess.run(['git', 'config', 'user.name', 'FF Likes Bot'], 
-                         cwd=self.repo_path, check=False)
-            
-            # Verify we can push
             result = subprocess.run(
-                ['git', 'remote', 'get-url', 'origin'],
-                cwd=self.repo_path, capture_output=True, text=True
+                ["git", "remote", "get-url", "origin"],
+                cwd=str(self.repo_path),
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
-            if result.returncode == 0 and 'github.com' in result.stdout:
-                self._git_configured = True
-                logger.info("GitHub persistence initialized successfully")
-            else:
-                logger.warning("GitHub remote not configured, persistence disabled")
-        except Exception as e:
-            logger.warning(f"Git initialization failed: {e}")
-    
-    @contextmanager
-    def _git_lock(self):
-        """Context manager for git operations to prevent conflicts."""
-        self._lock.acquire()
+            if result.returncode == 0:
+                parsed = urllib.parse.urlparse(result.stdout.strip())
+                if parsed.password:
+                    return parsed.password
+                if parsed.username and parsed.username.startswith("gh"):
+                    return parsed.username
+        except Exception:
+            pass
+        return ""
+
+    def _discover_repo(self):
+        env_repo = (os.getenv("GITHUB_REPO") or "").strip()
+        if "/" in env_repo:
+            owner, _, name = env_repo.partition("/")
+            return owner.strip(), name.strip()
         try:
-            yield
-        finally:
-            self._lock.release()
-    
-    def _run_git(self, args: List[str], check: bool = True) -> subprocess.CompletedProcess:
-        """Run a git command in the repo directory."""
-        return subprocess.run(
-            ['git'] + args,
-            cwd=self.repo_path,
-            capture_output=True,
-            text=True,
-            check=False
-        )
-    
-    def pull_latest(self) -> bool:
-        """Pull latest changes from GitHub."""
-        with self._git_lock():
-            try:
-                # Stash any local changes
-                self._run_git(['stash', '--include-untracked'], check=False)
-                
-                # Pull latest
-                result = self._run_git(['pull', '--rebase', 'origin', 'main'], check=False)
-                
-                # Restore stashed changes
-                self._run_git(['stash', 'pop'], check=False)
-                
-                if result.returncode == 0:
-                    logger.info("Successfully pulled latest changes from GitHub")
-                    return True
-                else:
-                    logger.warning(f"Git pull failed: {result.stderr}")
-                    return False
-            except Exception as e:
-                logger.error(f"Git pull failed: {e}")
-                return False
-    
-    def push_changes(self, message: str = "Auto-sync: Update bot data", files: Optional[List[str]] = None) -> bool:
-        """Push changes to GitHub."""
-        with self._git_lock():
-            try:
-                # Determine files to add
-                if files is None:
-                    # Add all tracked data files
-                    files_to_add = [str(self.bot_dir / f) for f in self.PERSISTED_FILES.keys() 
-                                   if (self.bot_dir / f).exists()]
-                else:
-                    files_to_add = [str(self.bot_dir / f) for f in files 
-                                   if (self.bot_dir / f).exists()]
-                
-                if not files_to_add:
-                    return True
-                
-                # Add files
-                for f in files_to_add:
-                    self._run_git(['add', f], check=False)
-                
-                # Check if there are changes
-                status = self._run_git(['status', '--porcelain'], check=False)
-                if not status.stdout.strip():
-                    return True  # Nothing to commit
-                
-                # Commit
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                commit_msg = f"Auto-sync: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Data update"
-                
-                result = self._run_git(['commit', '-m', commit_msg], check=False)
-                if result.returncode != 0:
-                    logger.warning(f"Git commit failed: {result.stderr}")
-                    return False
-                
-                # Push
-                result = self._run_git(['push', 'origin', 'main'], check=False)
-                if result.returncode == 0:
-                    logger.info(f"Successfully pushed changes to GitHub: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    return True
-                else:
-                    logger.error(f"Git push failed: {result.stderr}")
-                    return False
-            except Exception as e:
-                logger.error(f"Git push failed: {e}")
-                return False
-    
-    def sync_from_github(self) -> bool:
-        """Pull latest data from GitHub and update local files."""
-        try:
-            logger.info("Syncing data from GitHub...")
-            
-            # Pull latest
-            if not self.pull_latest():
-                logger.warning("Failed to pull from GitHub, using local data")
-                return False
-            
-            logger.info("Successfully synced from GitHub")
-            return True
-        except Exception as e:
-            logger.error(f"Sync from GitHub failed: {e}")
-            return False
-    
-    def save_and_sync(self, file_key: str, data: Any, message: Optional[str] = None) -> bool:
-        """Save data to file and push to GitHub."""
-        if file_key not in self.PERSISTED_FILES:
-            logger.warning(f"File {file_key} not in persisted files list")
-            return False
-        
-        file_path = self.bot_dir / self.PERSISTED_FILES[file_key]
-        
-        try:
-            # Save to file
-            with open(self.bot_dir / self.PERSISTED_FILES[file_key], 'w') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            
-            # Push to GitHub
-            msg = f"Update {file_key}: {data}" if message is None else message
-            return self.push_changes(files=[self.PERSISTED_FILES[file_key]], message=f"Update {file_key}")
-        except Exception as e:
-            logger.error(f"Failed to save and sync {file_key}: {e}")
-            return False
-    
-    def load_from_file(self, file_key: str) -> Any:
-        """Load data from a persisted file."""
-        if file_key not in self.PERSISTED_FILES:
-            return None
-        
-        file_path = self.bot_dir / self.PERSISTED_FILES[file_key]
-        if not file_path.exists():
-            return None
-        
-        try:
-            with open(file_path, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Failed to load {file_key}: {e}")
-            return None
-    
-    def start_auto_sync(self, interval: int = 30):
-        """Start background auto-sync thread."""
-        if self._running:
-            return
-        
-        self._running = True
-        self._push_interval = interval
-        self._push_thread = threading.Thread(target=self._auto_sync_loop, daemon=True)
-        self._push_thread.start()
-        logger.info(f"Auto-sync started with {interval}s interval")
-    
-    def stop_auto_sync(self):
-        """Stop the auto-sync thread."""
-        self._running = False
-        if self._push_thread:
-            self._push_thread.join(timeout=5)
-    
-    def _auto_sync_loop(self):
-        """Background thread for auto-sync."""
-        while self._running:
-            time.sleep(self._push_interval)
-            if not self._running:
-                break
-            
-            # Check if there are pending changes
-            with self._push_lock:
-                if self._push_queue:
-                    self.push_changes(message="Auto-sync: Periodic sync")
-    
-    def queue_push(self, file_key: str):
-        """Queue a file for async push."""
-        with self._push_lock:
-            if file_key in self.PERSISTED_FILES:
-                self._push_queue.append(file_key)
-    
-    def get_status(self) -> Dict[str, Any]:
-        """Get persistence status."""
+            result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=str(self.repo_path),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                parsed = urllib.parse.urlparse(result.stdout.strip())
+                parts = [p for p in parsed.path.split("/") if p]
+                if len(parts) >= 2:
+                    return parts[0], parts[1].removesuffix(".git")
+        except Exception:
+            pass
+        owner, _, name = DEFAULT_REPO.partition("/")
+        return owner, name
+
+    # ------------------------------------------------------------- HTTP helpers
+    def _headers(self) -> Dict[str, str]:
         return {
-            'git_configured': self._git_configured,
-            'auto_sync_running': self._running,
-            'push_interval': self._push_interval,
-            'pending_files': len(self._push_queue),
-            'last_push': self._last_push,
-            'persisted_files': list(self.PERSISTED_FILES.keys()),
-            'repo_path': str(self.repo_path),
-            'bot_dir': str(self.bot_dir),
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "ff-likes-bot",
         }
-    
-    def force_sync(self) -> bool:
-        """Force a full sync - pull and push."""
-        logger.info("Forcing full sync...")
-        self.pull_latest()
-        # Push all current data
-        return self.push_changes(message="Manual sync: Full data sync")
+
+    def _request(self, method: str, path: str, payload: Optional[dict] = None, timeout: int = 20):
+        import requests
+
+        url = f"{API_ROOT}{path}"
+        try:
+            response = requests.request(
+                method, url, headers=self._headers(), json=payload, timeout=timeout
+            )
+            return response
+        except Exception as exc:  # network failure
+            self._last_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("GitHub request failed (%s %s): %s", method, path, exc)
+            return None
+
+    def _ensure_branch(self) -> bool:
+        if not self.enabled:
+            return False
+        with self._lock:
+            if self._branch_ready:
+                return True
+            # Does the data branch already exist?
+            response = self._request("GET", f"/repos/{self.owner}/{self.repo}/git/ref/heads/{self.branch}")
+            if response is not None and response.status_code == 200:
+                self._branch_ready = True
+                return True
+            # Create it from main.
+            response = self._request("GET", f"/repos/{self.owner}/{self.repo}/git/ref/heads/main")
+            if response is None or response.status_code != 200:
+                self._last_error = "cannot read main branch ref"
+                return False
+            sha = (response.json() or {}).get("object", {}).get("sha")
+            if not sha:
+                self._last_error = "main branch ref has no sha"
+                return False
+            response = self._request(
+                "POST",
+                f"/repos/{self.owner}/{self.repo}/git/refs",
+                {"ref": f"refs/heads/{self.branch}", "sha": sha},
+            )
+            if response is not None and response.status_code in (201, 422):
+                self._branch_ready = True
+                return True
+            self._last_error = f"branch create failed: {getattr(response, 'status_code', 'no response')}"
+            return False
+
+    def _get_remote_file(self, filename: str):
+        """Return (decoded_bytes, sha) or (None, None)."""
+        if not self._ensure_branch():
+            return None, None
+        response = self._request(
+            "GET",
+            f"/repos/{self.owner}/{self.repo}/contents/{urllib.parse.quote(filename)}?ref={self.branch}",
+        )
+        if response is None or response.status_code == 404:
+            return None, None
+        if response.status_code != 200:
+            self._last_error = f"GET {filename} -> {response.status_code}"
+            return None, None
+        try:
+            body = response.json() or {}
+            content = base64.b64decode(body.get("content", ""))
+            return content, body.get("sha")
+        except Exception as exc:
+            self._last_error = f"decode {filename}: {exc}"
+            return None, None
+
+    def _put_remote_file(self, filename: str, data: bytes, message: str) -> bool:
+        if not self._ensure_branch():
+            return False
+        for attempt in (1, 2):
+            _, sha = self._get_remote_file(filename)
+            payload = {
+                "message": message,
+                "content": base64.b64encode(data).decode("ascii"),
+                "branch": self.branch,
+            }
+            if sha:
+                payload["sha"] = sha
+            response = self._request(
+                "PUT",
+                f"/repos/{self.owner}/{self.repo}/contents/{urllib.parse.quote(filename)}",
+                payload,
+            )
+            if response is not None and response.status_code in (200, 201):
+                return True
+            # 409 = sha conflict (another writer); retry once with fresh sha.
+            if response is not None and response.status_code == 409 and attempt == 1:
+                time.sleep(1)
+                continue
+            status = getattr(response, "status_code", "no response")
+            self._last_error = f"PUT {filename} -> {status}"
+            logger.warning("GitHub push failed for %s (status %s)", filename, status)
+            return False
+        return False
+
+    # ---------------------------------------------------------------- public API
+    def pull_latest(self) -> int:
+        """Download persisted files from GitHub into the bot directory.
+
+        Returns the number of files restored. Files that are not present
+        remotely are left untouched (never deleted).
+        """
+        if not self.enabled:
+            return 0
+        restored = 0
+        for filename in PERSISTED_FILES.values():
+            data, _ = self._get_remote_file(filename)
+            if data is None:
+                continue
+            # Validate before overwriting a working local file.
+            try:
+                json.loads(data.decode("utf-8"))
+            except Exception as exc:
+                logger.warning("Skipping corrupt remote file %s: %s", filename, exc)
+                continue
+            try:
+                target = self.bot_dir / filename
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                restored += 1
+            except Exception as exc:
+                logger.warning("Could not write %s: %s", filename, exc)
+        return restored
+
+    def seed_missing(self) -> int:
+        """Upload local files that do not exist on GitHub yet.
+
+        This preserves the settings already configured before persistence was
+        introduced, instead of resetting them to defaults.
+        """
+        if not self.enabled:
+            return 0
+        uploaded = 0
+        for filename in PERSISTED_FILES.values():
+            remote, _ = self._get_remote_file(filename)
+            if remote is not None:
+                continue
+            local = self.bot_dir / filename
+            if not local.exists():
+                continue
+            try:
+                if self._put_remote_file(filename, local.read_bytes(), f"Seed {filename} from existing bot data"):
+                    uploaded += 1
+            except Exception as exc:
+                logger.warning("Seed failed for %s: %s", filename, exc)
+        return uploaded
+
+    def push_changes(self, message: str = "Update bot data", files: Optional[list] = None) -> bool:
+        """Push the given files (or all persisted files) immediately."""
+        if not self.enabled:
+            return False
+        names = files or list(PERSISTED_FILES.values())
+        ok = True
+        for filename in names:
+            local = self.bot_dir / filename
+            if not local.exists():
+                continue
+            try:
+                data = local.read_bytes()
+            except Exception as exc:
+                logger.warning("Cannot read %s: %s", filename, exc)
+                ok = False
+                continue
+            if not self._put_remote_file(filename, data, message):
+                ok = False
+        if ok:
+            self._last_push = time.time()
+        return ok
+
+    def queue_push(self, file_key: str):
+        """Queue a file for background upload (safe to call from async code)."""
+        if not self.enabled:
+            return
+        filename = PERSISTED_FILES.get(file_key)
+        if not filename:
+            logger.warning("Unknown persistence key: %s", file_key)
+            return
+        with self._lock:
+            self._pending.add(file_key)
+        self._ensure_worker()
+
+    def _ensure_worker(self):
+        with self._lock:
+            if self._worker is not None and self._worker.is_alive():
+                return
+            self._running = True
+            self._worker = threading.Thread(
+                target=self._worker_loop, name="github-persistence", daemon=True
+            )
+            self._worker.start()
+
+    def _worker_loop(self):
+        # Small delay so a burst of save_all() calls is batched into one push.
+        time.sleep(2)
+        while self._running:
+            with self._lock:
+                keys = list(self._pending)
+                self._pending.clear()
+            if not keys:
+                time.sleep(3)
+                continue
+            for key in keys:
+                filename = PERSISTED_FILES.get(key)
+                if not filename:
+                    continue
+                local = self.bot_dir / filename
+                if not local.exists():
+                    continue
+                try:
+                    data = local.read_bytes()
+                except Exception as exc:
+                    logger.warning("Cannot read %s: %s", filename, exc)
+                    self._requeue(key)
+                    continue
+                if self._put_remote_file(filename, data, f"Update {filename}"):
+                    self._retry_count.pop(key, None)
+                else:
+                    self._requeue(key)
+            self._last_push = time.time()
+
+    def _requeue(self, key: str):
+        with self._lock:
+            attempts = self._retry_count.get(key, 0) + 1
+            self._retry_count[key] = attempts
+            if attempts <= 12:  # ~1 minute of retries with backoff
+                self._pending.add(key)
+        # Backoff handled by the loop's sleep below.
+        time.sleep(min(2 * attempts, 30))
+
+    def get_status(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "repo": f"{self.owner}/{self.repo}" if self.enabled else "",
+            "branch": self.branch,
+            "pending_files": len(self._pending),
+            "last_push": self._last_push,
+            "last_error": self._last_error,
+            "persisted_files": list(PERSISTED_FILES.values()),
+            "bot_dir": str(self.bot_dir),
+        }
 
 
-# Global instance
-_github_persistence: Optional[GitHubPersistence] = None
+# --------------------------------------------------------------------- globals
+_instance: Optional[GitHubPersistence] = None
+_instance_lock = threading.Lock()
 
 
 def get_github_persistence() -> GitHubPersistence:
-    """Get the global GitHub persistence instance."""
-    global _github_persistence
-    if _github_persistence is None:
-        _github_persistence = GitHubPersistence()
-    return _github_persistence
+    global _instance
+    with _instance_lock:
+        if _instance is None:
+            _instance = GitHubPersistence()
+        return _instance
 
 
-def init_github_persistence(repo_path: str = "/root/OWN-LIKE-BOT", bot_dir: str = "/root/OWN-LIKE-BOT/bot") -> GitHubPersistence:
-    """Initialize the GitHub persistence system."""
-    global _github_persistence
-    _github_persistence = GitHubPersistence(repo_path=repo_path, bot_dir=bot_dir)
-    return _github_persistence
+def init_github_persistence(repo_path: Optional[str] = None, bot_dir: Optional[str] = None) -> GitHubPersistence:
+    global _instance
+    with _instance_lock:
+        _instance = GitHubPersistence(repo_path=repo_path, bot_dir=bot_dir)
+        return _instance

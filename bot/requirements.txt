@@ -5,3 +5,4 @@ aiohttp
 protobuf>=5.27.0
 pycryptodome
 pytz
+GitPython

@@ -11,7 +11,7 @@ from datetime import datetime, date
 from datetime import time as datetime_time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler, TypeHandler
 from telegram.request import HTTPXRequest
 from telegram.error import BadRequest, NetworkError, RetryAfter, TelegramError
 
@@ -64,136 +64,172 @@ forward_channel_link = ""
 github_persistence = None
 
 # ============ HELPER FUNCTIONS ============
-forward_channel_id = ""
-forward_channel_link = ""
+def _read_json(path, default):
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return default
 
-# ============ HELPER FUNCTIONS ============
-async def load_data():
-    """Load data from local files and sync from GitHub."""
+
+def load_data():
+    """Load persisted data. GitHub is the source of truth when enabled."""
     global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channels, force_join_links, forward_channel_id, forward_channel_link
-    global github_persistence
-    
+
     if github_persistence:
         try:
-            # Try to sync from GitHub first
-            github_persistence.pull_latest()
-            
-            # Load from local files (which are now synced)
-            with open(DATA_FILES['allowed'], 'r') as f: allowed_groups = json.load(f)
-            with open(DATA_FILES['stats'], 'r') as f: daily_stats = json.load(f)
-            with open(DATA_FILES['users'], 'r') as f: user_limits = json.load(f)
-            with open(DATA_FILES['config'], 'r') as f:
-                cfg = json.load(f)
-                bot_status = cfg.get('status', 'on')
-                bot_mode = cfg.get('mode', 'public')
-                daily_limit = cfg.get('limit', 2)
-                like_tokens = int(cfg.get('like_tokens', 240))
-                force_join = cfg.get('force_join', False)
-                force_join_channels = cfg.get('force_join_channels', [])
-                force_join_links = cfg.get('force_join_links', {})
-                forward_channel_id = cfg.get('forward_channel_id', '')
-                forward_channel_link = cfg.get('forward_channel_link', '')
-            return
+            restored = github_persistence.pull_latest()
+            print(f"☁️ GitHub restore: {restored} file(s) pulled", flush=True)
         except Exception as e:
-            print(f"⚠️ GitHub sync failed, using local files: {e}", flush=True)
-    
-    # Fallback to local files only
-    try:
-        with open(DATA_FILES['allowed'], 'r') as f: allowed_groups = json.load(f)
-    except: allowed_groups = {}
-    try:
-        with open(DATA_FILES['stats'], 'r') as f: daily_stats = json.load(f)
-    except: daily_stats = {}
-    try:
-        with open(DATA_FILES['users'], 'r') as f: user_limits = json.load(f)
-    except: user_limits = {}
-    try:
-        with open(DATA_FILES['config'], 'r') as f:
-            cfg = json.load(f)
-            bot_status = cfg.get('status', 'on')
-            bot_mode = cfg.get('mode', 'public')
-            daily_limit = cfg.get('limit', 2)
-            like_tokens = int(cfg.get('like_tokens', 240))
-            force_join = cfg.get('force_join', False)
-            force_join_channels = cfg.get('force_join_channels', [])
-            force_join_links = cfg.get('force_join_links', {})
-            forward_channel_id = cfg.get('forward_channel_id', '')
-            forward_channel_link = cfg.get('forward_channel_link', '')
-    except:
-        bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channels, force_join_links, forward_channel_id, forward_channel_link = 'on', 'public', 2, 240, False, [], {}, '', ''
+            print(f"⚠️ GitHub restore failed, using local files: {e}", flush=True)
+
+    allowed_groups = _read_json(DATA_FILES['allowed'], {})
+    daily_stats = _read_json(DATA_FILES['stats'], {})
+    user_limits = _read_json(DATA_FILES['users'], {})
+    cfg = _read_json(DATA_FILES['config'], None)
+
+    # Apply saved values WITHOUT resetting anything to defaults.
+    if isinstance(cfg, dict):
+        bot_status = cfg.get('status', bot_status)
+        bot_mode = cfg.get('mode', bot_mode)
+        try:
+            daily_limit = int(cfg.get('limit', daily_limit))
+        except Exception:
+            pass
+        try:
+            like_tokens = int(cfg.get('like_tokens', like_tokens))
+        except Exception:
+            pass
+        force_join = bool(cfg.get('force_join', force_join))
+        force_join_channels = list(cfg.get('force_join_channels', force_join_channels) or [])
+        force_join_links = dict(cfg.get('force_join_links', force_join_links) or {})
+        forward_channel_id = cfg.get('forward_channel_id', forward_channel_id)
+        forward_channel_link = cfg.get('forward_channel_link', forward_channel_link)
+
+    # First run with persistence enabled: upload existing settings instead of
+    # replacing them with defaults.
+    if github_persistence:
+        try:
+            seeded = github_persistence.seed_missing()
+            if seeded:
+                print(f"☁️ GitHub seed: {seeded} file(s) uploaded", flush=True)
+        except Exception as e:
+            print(f"⚠️ GitHub seed failed: {e}", flush=True)
+
+    print(f"⚙️ Loaded settings: status={bot_status} mode={bot_mode} "
+          f"limit={daily_limit} like_tokens={like_tokens} "
+          f"force_join={force_join} channels={len(force_join_channels)}", flush=True)
 
 def save_all():
-    with open(DATA_FILES['allowed'], 'w') as f: json.dump(allowed_groups, f, indent=2)
-    with open(DATA_FILES['stats'], 'w') as f: json.dump(daily_stats, f, indent=2)
-    with open(DATA_FILES['users'], 'w') as f: json.dump(user_limits, f, indent=2)
-    with open(DATA_FILES['config'], 'w') as f: json.dump({'status': bot_status, 'mode': bot_mode, 'limit': daily_limit, 'like_tokens': like_tokens, 'force_join': force_join, 'force_join_channels': force_join_channels, 'force_join_links': force_join_links, 'forward_channel_id': forward_channel_id, 'forward_channel_link': forward_channel_link}, f, indent=2)
-    
-    # Queue for GitHub sync
-    global github_persistence
-    if github_persistence:
-        github_persistence.queue_push('allowed')
-        github_persistence.queue_push('stats')
-        github_persistence.queue_push('users')
-        github_persistence.queue_push('config')
-
-async def is_user_member(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
-    if not force_join or not force_join_channels:
-        return True
-    for channel in force_join_channels:
-        try:
-            member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
-            if member.status in ['member', 'administrator', 'creator']:
-                return True
-        except Exception as e:
-            print(f"Force join check error for channel {channel}: {e}")
-            continue
-    return False
-
-
-async def force_join_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    if not force_join or not force_join_channels:
-        return True
-    if is_admin(update.effective_user.id):
-        return True
-    user_id = update.effective_user.id
     try:
-        # Check if user is member of any required channel
-        for channel in force_join_channels:
-            if await is_user_member_single(context, user_id, channel):
-                return True
+        with open(DATA_FILES['allowed'], 'w') as f: json.dump(allowed_groups, f, indent=2)
+        with open(DATA_FILES['stats'], 'w') as f: json.dump(daily_stats, f, indent=2)
+        with open(DATA_FILES['users'], 'w') as f: json.dump(user_limits, f, indent=2)
+        with open(DATA_FILES['config'], 'w') as f:
+            json.dump({
+                'status': bot_status,
+                'mode': bot_mode,
+                'limit': daily_limit,
+                'like_tokens': like_tokens,
+                'force_join': force_join,
+                'force_join_channels': force_join_channels,
+                'force_join_links': force_join_links,
+                'forward_channel_id': forward_channel_id,
+                'forward_channel_link': forward_channel_link,
+            }, f, indent=2)
     except Exception as e:
-        print(f"Force join check error: {e}")
-        pass
-    
-    # Build keyboard with all required channels
+        print(f"⚠️ save_all local write failed: {e}", flush=True)
+
+    # Queue for GitHub sync (background, retried, never blocks the bot).
+    if github_persistence:
+        for key in ('allowed', 'stats', 'users', 'config'):
+            try:
+                github_persistence.queue_push(key)
+            except Exception as e:
+                print(f"⚠️ GitHub queue failed for {key}: {e}", flush=True)
+
+FORCE_JOIN_TEXT = (
+    "🔒 *JOIN ALL REQUIRED CHANNELS*\n\n"
+    "To use FF LIKES PRO, please join every channel/group below.\n\n"
+    "1️⃣ Tap each button and join\n"
+    "2️⃣ Come back and tap ✅ I'VE JOINED - VERIFY"
+)
+
+
+def build_force_join_keyboard() -> InlineKeyboardMarkup:
+    """One URL button per configured channel, then the verify button."""
     keyboard = []
     for channel in force_join_channels:
-        link = force_join_links.get(str(channel), '')
+        link = (force_join_links.get(str(channel)) or '').strip()
         if link:
             keyboard.append([InlineKeyboardButton(f"📢 Join {channel}", url=link)])
-    keyboard.append([InlineKeyboardButton("✅ I Joined - Verify", callback_data="verify_join")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    try:
-        await reply(update,
-                   "⚠️ *Force Join Required*\n\n"
-                   "You must join all required groups/channels to use this bot!\n\n"
-                   "1️⃣ Click 'Join' buttons below for each required channel\n"
-                   "2️⃣ Come back and click 'I Joined - Verify'\n\n"
-                   "After joining all channels, click verify to continue.",
-                   reply_markup)
-    except Exception as e:
-        print(f"Force join reply error: {e}")
+        else:
+            keyboard.append([InlineKeyboardButton(f"⚠️ {channel} (no link set)", callback_data="forcejoin_noop")])
+    keyboard.append([InlineKeyboardButton("✅ I'VE JOINED - VERIFY", callback_data="verify_join")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _member_is_joined(member) -> bool:
+    """Accept member/admin/creator, and restricted users who are still members."""
+    status = getattr(member, "status", "")
+    status = getattr(status, "value", status)  # enum -> str
+    if status in ("member", "administrator", "creator"):
+        return True
+    if status == "restricted" and getattr(member, "is_member", False):
+        return True
     return False
 
 
 async def is_user_member_single(context: ContextTypes.DEFAULT_TYPE, user_id: int, channel: str) -> bool:
-    """Check if user is member of a specific channel."""
+    """Check membership in one channel. Errors are treated as 'not joined'."""
     try:
         member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
-        return member.status in ['member', 'administrator', 'creator']
+        return _member_is_joined(member)
     except Exception as e:
-        print(f"Force join check error for channel {channel}: {e}")
+        print(f"⚠️ getChatMember failed for '{channel}': {e}", flush=True)
         return False
+
+
+async def get_missing_channels(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    """Return the list of required channels the user has NOT joined."""
+    missing = []
+    for channel in force_join_channels:
+        if not await is_user_member_single(context, user_id, channel):
+            missing.append(channel)
+    return missing
+
+
+async def is_user_member(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+    """True only when the user is a member of EVERY required channel."""
+    if not force_join or not force_join_channels:
+        return True
+    return len(await get_missing_channels(context, user_id)) == 0
+
+
+async def force_join_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Block access until the user has joined ALL required channels."""
+    if not force_join or not force_join_channels:
+        return True
+    user = update.effective_user
+    if user is None:
+        return True
+    if is_admin(user.id):
+        return True
+
+    missing = await get_missing_channels(context, user.id)
+    if not missing:
+        return True
+
+    reply_markup = build_force_join_keyboard()
+    text = FORCE_JOIN_TEXT
+    try:
+        if update.callback_query is not None:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        elif update.message is not None:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    except Exception as e:
+        print(f"Force join reply error: {e}", flush=True)
+    return False
 
 
 def is_admin(uid): return uid in ADMIN_IDS
@@ -302,9 +338,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if bot_status == "off":
         await reply(update, "🔴 Bot is currently OFF")
         return
-    # Add to broadcast list
-    chat = update.effective_chat
-    add_to_broadcast(chat.id, chat.type, chat.title)
+    # Register this chat for broadcasts (users + groups)
+    register_chat(update)
     msg = (
         "✨ *𝑭𝑹𝑬𝑬 𝑭𝑰𝑹𝑬 𝑳𝑰𝑲𝑬 𝑩𝑶𝑻* ✨\n"
         "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
@@ -339,10 +374,14 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/setapi100` – Set to 100 tokens (~100–110 likes)\n"
         "`/setapi <num>` – Set custom tokens (10–400)\n"
         "`/setapimax` or `/maxff` – Set to 400 tokens (max)\n"
-        "`/setforcejoin <channel> <link>` – Enable force join\n"
-        "`/removeforcejoin` – Disable force join\n"
-        "`/forcejoinstatus` – Check force join status\n"
-        "`/broadcast <message>` – Send message to all chats"
+        "`/setforcejoin <channel> <link>` – Add required channel\n"
+        "`/addforcejoin <channel> <link>` – Add another required channel\n"
+        "`/removeforcejoin <channel>` – Remove one required channel\n"
+        "`/removeforcejoin all` – Remove all required channels\n"
+        "`/forcejoinlist` – List required channels\n"
+        "`/forcejoinstatus` – Show force-join configuration\n"
+        "`/forcejoinon` / `/forcejoinoff` – Enable/disable force join\n"
+        "`/broadcast <message>` – Send message to all users and groups"
     )
     await reply(update, msg)
 
@@ -437,10 +476,11 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Helper to safely edit or fall back to new message
     async def _respond(text, fallback_text=None):
         """Try to edit proc_msg; if that fails, send a new message."""
+        sent = None
         if proc_msg is not None:
             try:
                 await proc_msg.edit_text(text)
-                return
+                return proc_msg
             except (BadRequest, NetworkError, RetryAfter, TelegramError) as e:
                 import traceback
                 print(f"❌ Failed to edit processing message in like_cmd: {e}", flush=True)
@@ -451,7 +491,8 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 traceback.print_exc()
         # Fallback: send new message
         try:
-            await update.message.reply_text(fallback_text or text)
+            sent = await update.message.reply_text(fallback_text or text)
+            return sent
         except (BadRequest, NetworkError, RetryAfter, TelegramError) as e:
             import traceback
             print(f"❌ Failed to send fallback message in like_cmd: {e}", flush=True)
@@ -460,6 +501,7 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
             import traceback
             print(f"❌ Unexpected error sending fallback message: {e}", flush=True)
             traceback.print_exc()
+        return None
 
     # API returned an error
     if data is None or "error" in data:
@@ -522,91 +564,114 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         result = f"❓ Unknown API response\nStatus code: {status}\nPlease contact the bot admin."
 
-    await _respond(result)
+    # Reply to the user and capture the sent message (for native forwarding)
+    sent_msg = await _respond(result)
 
-    # Forward successful like result to configured channel
-    if status == 1 and forward_channel_id:
+    # Forward the EXACT success result message to the configured channel.
+    # Native forwardMessage preserves the original formatting exactly.
+    if status == 1 and forward_channel_id and sent_msg is not None:
         try:
-            # Forward the success message to the configured channel
-            # We need to get the message ID of the sent result first
-            # Since _respond returns the message, we can forward it
-            # For now, we'll send a copy of the result to the forward channel
-            forward_text = (
-                f"✅ <b>LIKE SENT</b> ✅\n\n"
-                f"👤 <b>Player:</b> {player}\n"
-                f"🏷️ <b>UID:</b> {uid_resp}\n"
-                f"🌍 <b>Region:</b> {region_resp}\n"
-                f"⭐ <b>Level:</b> {level}\n\n"
-                f"❤️ <b>Likes given:</b> +{given}\n"
-                f"📊 <b>Total:</b> {before} → {after}\n\n"
-                f"📅 <b>Requested by:</b> <code>{user_id}</code>"
+            await context.bot.forward_message(
+                chat_id=forward_channel_id,
+                from_chat_id=sent_msg.chat.id,
+                message_id=sent_msg.message_id,
             )
-            try:
-                if forward_channel_id:
-                    await context.bot.send_message(
-                        chat_id=forward_channel_id,
-                        text=forward_text,
-                        parse_mode='HTML'
-                    )
-            except Exception as e:
-                # Log error but don't fail the main operation
-                print(f"⚠️ Failed to forward like notification: {e}", flush=True)
         except Exception as e:
-            print(f"⚠️ Error in forward logic: {e}", flush=True)
+            # Log the error but never break the successful like operation.
+            print(f"⚠️ Failed to forward successful like to {forward_channel_id}: {e}", flush=True)
 
 # ============ JWT TOKEN UPLOAD HANDLER ============
 # Broadcast list file
 BROADCAST_FILE = "broadcast_list.json"
 
-# Forward channel settings (for successful like notifications)
-FORWARD_CHANNEL_ID = ""
-FORWARD_CHANNEL_LINK = ""
-
 # Successful likes log file
 LIKE_LOG_FILE = "successful_likes.json"
 
 
-def add_to_broadcast(chat_id, chat_type, chat_title=None):
-    """Add a chat to the broadcast list."""
-    try:
-        with open(BROADCAST_FILE, "r") as f:
-            data = json.load(f)
-    except Exception:
-        data = {"chats": {}, "users": {}}
+def _load_broadcast_data():
+    data = _read_json(BROADCAST_FILE, None)
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("chats", {})
+    data.setdefault("users", {})
+    return data
 
+
+def _save_broadcast_data(data):
+    try:
+        with open(BROADCAST_FILE, "w") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"⚠️ Broadcast list write failed: {e}", flush=True)
+        return
+    if github_persistence:
+        try:
+            github_persistence.queue_push('broadcast')
+        except Exception as e:
+            print(f"⚠️ GitHub queue failed for broadcast: {e}", flush=True)
+
+
+def add_to_broadcast(chat_id, chat_type, chat_title=None):
+    """Register a group/supergroup/channel chat for broadcasts."""
+    data = _load_broadcast_data()
     cid = str(chat_id)
-    if cid not in data["chats"]:
+    entry = data["chats"].get(cid)
+    if entry is None:
         data["chats"][cid] = {
             "chat_id": chat_id,
             "chat_type": chat_type,
             "title": chat_title or "",
-            "added_at": str(date.today())
+            "added_at": str(date.today()),
         }
-        with open(BROADCAST_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+        _save_broadcast_data(data)
+    elif chat_title and entry.get("title") != chat_title:
+        entry["title"] = chat_title
+        entry["chat_type"] = chat_type
+        _save_broadcast_data(data)
 
 
 def add_user_to_broadcast(user_id, username=None, first_name=None):
-    """Add a user to the broadcast list."""
-    try:
-        with open(BROADCAST_FILE, "r") as f:
-            data = json.load(f)
-    except Exception:
-        data = {"chats": {}, "users": {}}
-
-    uid = str(chat_id)
-    if "users" not in data:
-        data["users"] = {}
-    uid = str(chat_id)
-    if uid not in data["users"]:
+    """Register a private user chat for broadcasts."""
+    data = _load_broadcast_data()
+    uid = str(user_id)
+    entry = data["users"].get(uid)
+    if entry is None:
         data["users"][uid] = {
             "user_id": user_id,
             "username": username or "",
             "first_name": first_name or "",
-            "added_at": str(date.today())
+            "added_at": str(date.today()),
         }
-        with open(BROADCAST_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+        _save_broadcast_data(data)
+    else:
+        changed = False
+        if username and entry.get("username") != username:
+            entry["username"] = username
+            changed = True
+        if first_name and entry.get("first_name") != first_name:
+            entry["first_name"] = first_name
+            changed = True
+        if changed:
+            _save_broadcast_data(data)
+
+
+def register_chat(update: Update):
+    """Save every user/group that interacts with the bot (for broadcasts)."""
+    try:
+        chat = update.effective_chat
+        if chat is None:
+            return
+        if chat.type == "private":
+            add_user_to_broadcast(chat.id, getattr(chat, "username", None), getattr(chat, "first_name", None))
+        else:
+            add_to_broadcast(chat.id, chat.type, getattr(chat, "title", None))
+    except Exception as e:
+        print(f"⚠️ register_chat failed: {e}", flush=True)
+
+
+async def register_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """TypeHandler: runs for every update, before command handlers."""
+    register_chat(update)
 
 
 def log_successful_like(uid, region, likes_given, before, after, user_id):
@@ -680,7 +745,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Broadcast a message to all users and groups. Admin only."""
+    """Broadcast an exact message to every registered user and group. Admin only."""
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
@@ -689,41 +754,67 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply(update, "❌ Usage: `/broadcast <message>`\nExample: `/broadcast Hello everyone!`")
         return
 
-    message = " ".join(context.args)
-
-    try:
-        with open(BROADCAST_FILE, "r") as f:
-            data = json.load(f)
-    except Exception:
-        await reply(update, "❌ No broadcast list found.")
+    # Preserve the exact text, including newlines and formatting.
+    raw_text = (update.message.text or "") if update.message else ""
+    parts = raw_text.split(None, 1)
+    message = parts[1] if len(parts) > 1 else " ".join(context.args)
+    if not message.strip():
+        await reply(update, "❌ Broadcast message is empty.")
         return
 
-    chats = data.get("chats", {})
-    users = data.get("users", {})
-    if not chats and not users:
-        await reply(update, "❌ No chats or users in broadcast list.")
+    data = _load_broadcast_data()
+    targets = []
+    seen = set()
+    for source in (data.get("chats", {}), data.get("users", {})):
+        for raw_id in source.keys():
+            try:
+                chat_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if chat_id in seen:
+                continue
+            seen.add(chat_id)
+            targets.append(chat_id)
+
+    if not targets:
+        await reply(
+            update,
+            "❌ No registered users or groups yet.\n\n"
+            "Recipients are added automatically whenever someone sends /start "
+            "or interacts with the bot. Try again after users have used the bot."
+        )
         return
 
     sent = 0
     failed = 0
+    failed_ids = []
 
-    # Send to groups/chats
-    for cid, info in data.get("chats", {}).items():
+    for chat_id in targets:
         try:
-            await context.bot.send_message(chat_id=int(cid), text=f"📢 *Broadcast:*\n\n{message}", parse_mode='Markdown')
+            await context.bot.send_message(chat_id=chat_id, text=message)
             sent += 1
-        except Exception:
+        except RetryAfter as e:
+            try:
+                await asyncio.sleep(min(int(getattr(e, "retry_after", 1)), 5))
+                await context.bot.send_message(chat_id=chat_id, text=message)
+                sent += 1
+            except Exception:
+                failed += 1
+                failed_ids.append(chat_id)
+        except Exception as e:
             failed += 1
+            failed_ids.append(chat_id)
+            print(f"⚠️ Broadcast failed for {chat_id}: {e}", flush=True)
 
-    # Send to users
-    for uid, info in data.get("users", {}).items():
-        try:
-            await context.bot.send_message(chat_id=int(uid), text=f"📢 *Broadcast:*\n\n{message}", parse_mode='Markdown')
-            sent += 1
-        except Exception:
-            failed += 1
-
-    await reply(update, f"✅ Broadcast sent!\n📤 Sent: {sent}\n❌ Failed: {failed}\n📊 Total: {sent + failed}")
+    report = (
+        "📢 *Broadcast Report*\n\n"
+        f"👥 Total recipients: `{len(targets)}`\n"
+        f"✅ Successful deliveries: `{sent}`\n"
+        f"❌ Failed deliveries: `{failed}`"
+    )
+    if failed_ids:
+        report += "\n\n*Failed chat IDs:*\n" + "\n".join(f"`{i}`" for i in failed_ids[:20])
+    await reply(update, report)
 
 # ============ ADMIN COMMANDS ============
 async def allow_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -758,6 +849,8 @@ async def on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply(update, "🟢 *Bot is now ON*")
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_check(update, context):
+        return
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
@@ -825,102 +918,250 @@ async def set_api_100(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============ FORCE JOIN COMMANDS ============
-async def setforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add a channel to the force join list."""
+def _normalize_channel(value: str) -> str:
+    return (value or "").strip()
+
+
+def _find_channel_index(channel: str) -> int:
+    """Find a configured channel by exact or case-insensitive username match."""
+    for i, existing in enumerate(force_join_channels):
+        if existing == channel:
+            return i
+    target = channel.lower().lstrip("@")
+    for i, existing in enumerate(force_join_channels):
+        if existing.lower().lstrip("@") == target:
+            return i
+    return -1
+
+
+def _format_force_join_list() -> str:
+    if not force_join_channels:
+        return "  None configured"
+    lines = []
+    for i, ch in enumerate(force_join_channels, start=1):
+        link = force_join_links.get(str(ch), "") or "No link set"
+        lines.append(f"  {i}. `{ch}`\n     🔗 {link}")
+    return "\n".join(lines)
+
+
+async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
-    global force_join, force_join_channels, force_join_links
+
+    global force_join
     if len(context.args) < 1:
-        await reply(update, "❌ Usage:\n`/setforcejoin <channel_username_or_id> <invite_link>`\n\nExample:\n`/setforcejoin @yourchannel https://t.me/+xxxxx`\n\nTo enable: add both. For private invite links, use the link + also set channel id if possible.")
+        await reply(
+            update,
+            "❌ Usage:\n`/setforcejoin <channel_username_or_id> <invite_link>`\n\n"
+            "Example:\n`/setforcejoin @yourchannel https://t.me/+xxxxx`\n\n"
+            "Add more with `/addforcejoin <channel> <link>`."
+        )
         return
-    channel = context.args[0]
-    link = context.args[1] if len(context.args) > 1 else ''
-    if channel not in force_join_channels:
+
+    channel = _normalize_channel(context.args[0])
+    link = _normalize_channel(context.args[1]) if len(context.args) > 1 else ""
+
+    # Be forgiving if the admin passes link first.
+    if channel.lower().startswith(("http://", "https://", "tg://")) and link and not link.lower().startswith(("http://", "https://", "tg://")):
+        channel, link = link, channel
+
+    if not channel:
+        await reply(update, "❌ Invalid channel.")
+        return
+
+    index = _find_channel_index(channel)
+    if index >= 0:
+        old = force_join_channels[index]
+        force_join_channels[index] = channel
+        if old != channel:
+            force_join_links.pop(str(old), None)
+        force_join_links[str(channel)] = link
+        action = "updated"
+    else:
         force_join_channels.append(channel)
-    force_join_links[str(channel)] = link
+        force_join_links[str(channel)] = link
+        action = "added"
+
     force_join = True
     save_all()
-    await reply(update,
-               f"✅ *Force Join Channel Added*\n\n"
-               f"📢 Channel: `{channel}`\n"
-               f"🔗 Link: {link if link else 'Not provided'}\n\n"
-               f"Users must join this channel to use bot.\n"
-               f"Total required channels: {len(force_join_channels)}")
+
+    note = "" if link else "\n\n⚠️ No invite link set. Add one so users get a Join button."
+    await reply(
+        update,
+        f"✅ *Force Join Channel {action.title()}*\n\n"
+        f"📢 Channel: `{channel}`\n"
+        f"🔗 Link: {link if link else 'Not provided'}\n"
+        f"🔢 Total required channels: `{len(force_join_channels)}`\n"
+        f"🟢 Force join: Enabled{note}"
+    )
+
+
+async def setforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add the first/another required channel."""
+    await _add_force_join(update, context)
+
+
+async def addforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add another required channel (alias of /setforcejoin)."""
+    await _add_force_join(update, context)
 
 
 async def removeforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Remove a channel from the force join list."""
+    """Remove one required channel, or all of them."""
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
-    global force_join, force_join_channels, force_join_links
+
+    global force_join
     if len(context.args) < 1:
-        await reply(update, "❌ Usage: `/removeforcejoin <channel_username_or_id>`\n\nExample:\n`/removeforcejoin @yourchannel`")
+        await reply(
+            update,
+            "❌ Usage:\n`/removeforcejoin <channel_username_or_id>`\n"
+            "`/removeforcejoin all`\n\n"
+            "Example:\n`/removeforcejoin @yourchannel`"
+        )
         return
-    channel = context.args[0]
-    if channel in force_join_channels:
-        force_join_channels.remove(channel)
-    if str(channel) in force_join_links:
-        del force_join_links[str(channel)]
+
+    target = _normalize_channel(context.args[0])
+
+    if target.lower() == "all":
+        count = len(force_join_channels)
+        force_join_channels.clear()
+        force_join_links.clear()
+        force_join = False
+        save_all()
+        await reply(update, f"✅ *All Force Join Channels Removed*\n\nRemoved: `{count}`\n🟢 Force join: Disabled")
+        return
+
+    index = _find_channel_index(target)
+    if index < 0:
+        await reply(update, f"❌ Channel `{target}` is not in the force-join list.\n\nUse `/forcejoinlist` to see configured channels.")
+        return
+
+    removed = force_join_channels.pop(index)
+    force_join_links.pop(str(removed), None)
     if not force_join_channels:
         force_join = False
     save_all()
-    await reply(update, f"✅ *Force Join Channel Removed*\n\n📢 Channel: `{channel}`\n\nRemaining required channels: {len(force_join_channels)}")
+    await reply(
+        update,
+        f"✅ *Force Join Channel Removed*\n\n"
+        f"📢 Channel: `{removed}`\n"
+        f"🔢 Remaining required channels: `{len(force_join_channels)}`\n"
+        f"🟢 Force join: {'Enabled' if force_join else 'Disabled'}"
+    )
 
 
-async def forcejoinstatus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def forcejoinlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
-    status = "✅ Enabled" if force_join else "❌ Disabled"
-    channels_text = "\n".join([f"  📢 `{ch}` - {force_join_links.get(str(ch), 'No link')}" for ch in force_join_channels]) if force_join_channels else "  None"
-    await reply(update,
-               f"📊 *Force Join Status*\n\n"
-               f"Status: {status}\n"
-               f"Required Channels: {len(force_join_channels)}\n\n"
-               f"Channels:\n{channels_text}")
+    await reply(
+        update,
+        f"📋 *Force Join Channels*\n\n"
+        f"🟢 Force join: {'Enabled' if force_join else 'Disabled'}\n"
+        f"🔢 Total: `{len(force_join_channels)}`\n\n"
+        f"{_format_force_join_list()}"
+    )
+
+
+async def forcejoinstatus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the real saved configuration and verify each channel is reachable."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+
+    if not force_join_channels:
+        await reply(
+            update,
+            "📊 *Force Join Status*\n\n"
+            f"Status: {'✅ Enabled' if force_join else '❌ Disabled'}\n"
+            "Required channels: `0`\n\n"
+            "No channels configured. Add one with `/setforcejoin <channel> <link>`."
+        )
+        return
+
+    lines = []
+    for ch in force_join_channels:
+        link = force_join_links.get(str(ch), "") or "No link set"
+        try:
+            chat = await context.bot.get_chat(ch)
+            title = getattr(chat, "title", None) or getattr(chat, "username", None) or "unknown"
+            lines.append(f"• `{ch}` — ✅ reachable\n   {title} (id: `{chat.id}`)\n   🔗 {link}")
+        except Exception as e:
+            lines.append(f"• `{ch}` — ⚠️ not reachable by bot\n   {type(e).__name__}: {str(e)[:80]}\n   🔗 {link}")
+
+    await reply(
+        update,
+        "📊 *Force Join Status*\n\n"
+        f"Status: {'✅ Enabled' if force_join else '❌ Disabled (channels saved but force join is OFF)'}\n"
+        f"Required channels: `{len(force_join_channels)}`\n\n"
+        + "\n".join(lines)
+    )
+
+
+async def forcejoinon(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    global force_join
+    if not force_join_channels:
+        await reply(update, "❌ No channels configured. Add one with `/setforcejoin <channel> <link>` first.")
+        return
+    force_join = True
+    save_all()
+    await reply(update, f"🟢 *Force Join Enabled*\n\nRequired channels: `{len(force_join_channels)}`")
+
+
+async def forcejoinoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    global force_join
+    force_join = False
+    save_all()
+    await reply(update, "🔴 *Force Join Disabled*\n\nSaved channels are kept. Re-enable with `/forcejoinon`.")
 
 
 async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    if not force_join or not force_join_channels:
-        await query.edit_message_text("✅ Force join is disabled. You can use the bot now.")
-        return
+
     if is_admin(user_id):
         await query.edit_message_text("✅ Admin verified. You can use the bot now.")
         return
-    try:
-        if await is_user_member(context, user_id):
-            await query.edit_message_text(
-                "✅ *Verification Successful!*\n\n"
-                "You can now use the bot.\n"
-                "Send /start or /like to continue."
-            )
-            return
-    except Exception:
-        # Can't check membership (bot not admin / private) - allow if they clicked verify after joining
+
+    if not force_join or not force_join_channels:
+        await query.edit_message_text("✅ Force join is disabled. You can use the bot now.")
+        return
+
+    # Always check real membership in EVERY channel. Never trust the click.
+    missing = await get_missing_channels(context, user_id)
+    if not missing:
         await query.edit_message_text(
-            "✅ *Verified!*\n\n"
+            "✅ *Verification Successful!*\n\n"
             "You can now use the bot.\n"
-            "Send /start or /like to continue."
+            "Send /start or /like to continue.",
+            parse_mode='Markdown'
         )
         return
-    # Build keyboard with all required channels
-    keyboard = []
-    for channel in force_join_channels:
-        link = force_join_links.get(str(channel), '')
-        if link:
-            keyboard.append([InlineKeyboardButton(f"📢 Join {channel}", url=link)])
-    keyboard.append([InlineKeyboardButton("✅ I Joined - Verify", callback_data="verify_join")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    missing_lines = "\n".join(f"• `{ch}`" for ch in missing)
     await query.edit_message_text(
         "❌ *Verification Failed*\n\n"
-        "Join all required groups/channels first, then click 'I Joined - Verify'.",
-        reply_markup=reply_markup
+        "You still need to join:\n"
+        f"{missing_lines}\n\n"
+        "Join every channel above, then tap ✅ I'VE JOINED - VERIFY again.",
+        reply_markup=build_force_join_keyboard(),
+        parse_mode='Markdown'
     )
+
+
+async def forcejoin_noop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer("No invite link is configured for this channel. Ask an admin.", show_alert=True)
 
 
 # ============ LIKE MODE COMMANDS ============
@@ -1056,15 +1297,20 @@ def main():
         app.add_handler(CommandHandler("setapimax", set_api_max))
         app.add_handler(CommandHandler("maxff", set_api_max))
         app.add_handler(CommandHandler("setforcejoin", setforcejoin))
+        app.add_handler(CommandHandler("addforcejoin", addforcejoin))
         app.add_handler(CommandHandler("removeforcejoin", removeforcejoin))
+        app.add_handler(CommandHandler("forcejoinlist", forcejoinlist))
         app.add_handler(CommandHandler("forcejoinstatus", forcejoinstatus))
+        app.add_handler(CommandHandler("forcejoinon", forcejoinon))
+        app.add_handler(CommandHandler("forcejoinoff", forcejoinoff))
         app.add_handler(CommandHandler("broadcast", broadcast_cmd))
         app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
-        # Ignore stickers silently - don't reply to stickers
-        async def ignore_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            pass
-        app.add_handler(MessageHandler(filters.Sticker.ALL, ignore_sticker))
-        app.add_handler(MessageHandler(filters.ATTACHMENT, handle_document))
+        app.add_handler(CallbackQueryHandler(forcejoin_noop_callback, pattern="^forcejoin_noop$"))
+        # Register every user/group that interacts with the bot (broadcast registry).
+        app.add_handler(TypeHandler(Update, register_update), group=-1)
+        # Stick silences: stickers produce NO reply — not even "Admin only" / "No document".
+        # filters.Document.ALL matches only documents (never stickers).
+        app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         app.add_error_handler(error_handler)
 
         print("🤖 Bot is running...", flush=True)
