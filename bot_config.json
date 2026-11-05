@@ -1,6 +1,6 @@
 {
   "status": "on",
-  "mode": "public",
+  "mode": "private",
   "limit": 2,
   "like_tokens": 300,
   "force_join": true,
