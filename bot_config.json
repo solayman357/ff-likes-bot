@@ -2,7 +2,7 @@
   "status": "on",
   "mode": "public",
   "limit": 2,
-  "like_tokens": 400,
+  "like_tokens": 300,
   "force_join": true,
   "force_join_channels": [
     "@FFLIKESPRO2",
