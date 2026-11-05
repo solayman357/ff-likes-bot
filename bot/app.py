@@ -11,7 +11,7 @@ from datetime import datetime, date
 from datetime import time as datetime_time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler, ChatMemberHandler
 from telegram.request import HTTPXRequest
 from telegram.error import BadRequest, NetworkError, RetryAfter, TelegramError
 
@@ -706,6 +706,145 @@ def register_chat(update: Update):
         print(f"⚠️ register_chat failed: {e}", flush=True)
 
 
+async def my_chat_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Auto-register groups when the bot is added, and unregister when removed/kicked.
+
+    Handles my_chat_member updates so groups are tracked even when no user
+    sends a command. Also removes groups from broadcast when the bot leaves
+    or is kicked.
+    """
+    try:
+        chat = update.effective_chat
+        if chat is None:
+            return
+        my_member = update.my_chat_member
+        if my_member is None:
+            return
+
+        old_status = my_member.old_chat_member.status
+        new_status = my_member.new_chat_member.status
+
+        # Get status as string (PTB enum -> str)
+        def _status_str(s):
+            return getattr(s, "value", s)
+
+        old_s = _status_str(old_status)
+        new_s = _status_str(new_status)
+
+        # Bot was added to or became admin/member in a group/supergroup/channel
+        if new_s in ("member", "administrator", "creator") and old_s not in ("member", "administrator", "creator"):
+            add_to_broadcast(chat.id, chat.type, getattr(chat, "title", None))
+            print(f"✅ Auto-registered chat {chat.id} ({chat.type}) via my_chat_member", flush=True)
+            return
+
+        # Bot was kicked/left — remove from broadcast list
+        if new_s in ("left", "kicked") and old_s in ("member", "administrator", "creator"):
+            remove_from_broadcast(chat.id)
+            print(f"🗑️ Removed chat {chat.id} ({chat.type}) from broadcast (bot removed)", flush=True)
+            return
+    except Exception as e:
+        print(f"⚠️ my_chat_member_handler failed: {e}", flush=True)
+
+
+def remove_from_broadcast(chat_id):
+    """Remove a chat from the broadcast list (e.g. when bot is kicked from group)."""
+    try:
+        data = _load_broadcast_data()
+        cid = str(chat_id)
+        removed = False
+        if cid in data.get("chats", {}):
+            del data["chats"][cid]
+            removed = True
+        if removed:
+            _save_broadcast_data(data)
+            return True
+        return False
+    except Exception as e:
+        print(f"⚠️ remove_from_broadcast failed: {e}", flush=True)
+        return False
+
+
+async def register_group_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manually register the current group for broadcasts. Admin only."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    chat = update.effective_chat
+    if chat is None or chat.type == "private":
+        await reply(update, "❌ Use this command in a group/supergroup.")
+        return
+    add_to_broadcast(chat.id, chat.type, getattr(chat, "title", None))
+    await reply(
+        update,
+        f"✅ *Group Registered for Broadcast*\n\n"
+        f"📢 Chat: `{chat.id}`\n"
+        f"📝 Title: {getattr(chat, 'title', 'Unknown')}\n"
+        f"🔢 Total groups in broadcast: `{len(_load_broadcast_data().get('chats', {}))}`"
+    )
+
+
+async def apistatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show API token status. Admin only. Reads from the API's /token_info endpoint."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+
+    try:
+        base = API_URL.rstrip("/") + "/"
+        url = f"{base}token_info?key={API_KEY}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                if resp.status != 200:
+                    await reply(update, f"❌ API Error: HTTP {resp.status}")
+                    return
+                data = await resp.json(content_type=None)
+
+        total = data.get("total", {})
+        files = data.get("files", {})
+        config = data.get("config", {})
+
+        total_tokens = total.get("tokens", 0)
+        used_today = total.get("used_today", 0)
+        capacity_today = total.get("capacity_today", 0)
+        remaining_today = total.get("remaining_today", 0)
+        likes_per_token = config.get("LIKES_PER_TOKEN_PER_DAY", 0)
+
+        # Count tokens per file
+        file_token_counts = {}
+        for fname, fstat in files.items():
+            file_token_counts[fname] = fstat.get("token_count", 0)
+
+        # Active = tokens remaining capacity (fresh/valid in bank)
+        active_tokens = total_tokens  # All tokens in bank are valid/fresh
+        invalid_tokens = 0
+
+        msg = (
+            "🔑 *API STATUS*\n\n"
+            f"📊 Total API Tokens: `{total_tokens}`\n"
+            f"🟢 Active Tokens: `{active_tokens}`\n"
+            f"🔴 Invalid/Disabled: `{invalid_tokens}`\n"
+            f"⚙️ Current API: Token Bank ({total_tokens} tokens)\n"
+            f"📦 Total Capacity: `{capacity_today}` likes/day\n"
+            f"📈 Used Today: `{used_today}`\n"
+            f"📉 Remaining Today: `{remaining_today}`\n"
+            f"❤️ Likes Per Token/Day: `{likes_per_token}`\n"
+        )
+
+        # Per-file breakdown
+        if file_token_counts:
+            msg += "\n*Per File:*\n"
+            for fname, count in file_token_counts.items():
+                msg += f"• `{fname}`: `{count}` tokens\n"
+
+        msg += "\n🔐 @DCFsolayman"
+        await reply(update, msg)
+
+    except asyncio.TimeoutError:
+        await reply(update, "❌ API request timed out.")
+    except Exception as e:
+        await reply(update, f"❌ Error fetching API status: `{type(e).__name__}`")
+
+
 async def register_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """TypeHandler: runs for every update, before command handlers."""
     register_chat(update)
@@ -800,33 +939,45 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     data = _load_broadcast_data()
-    targets = []
+    user_targets = []
+    group_targets = []
     seen = set()
-    for source in (data.get("chats", {}), data.get("users", {})):
-        for raw_id in source.keys():
-            try:
-                chat_id = int(raw_id)
-            except (TypeError, ValueError):
-                continue
-            if chat_id in seen:
-                continue
-            seen.add(chat_id)
-            targets.append(chat_id)
+    for raw_id in data.get("users", {}).keys():
+        try:
+            chat_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if chat_id in seen:
+            continue
+        seen.add(chat_id)
+        user_targets.append(chat_id)
+    for raw_id in data.get("chats", {}).keys():
+        try:
+            chat_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if chat_id in seen:
+            continue
+        seen.add(chat_id)
+        group_targets.append(chat_id)
 
-    if not targets:
+    if not user_targets and not group_targets:
         await reply(
             update,
             "❌ No registered users or groups yet.\n\n"
-            "Recipients are added automatically whenever someone sends /start "
-            "or interacts with the bot. Try again after users have used the bot."
+            "Recipients are added automatically when the bot is added to a group "
+            "(my_chat_member) or when someone sends /start /info /like. "
+            "Admins can also use /registergroup in a group."
         )
         return
 
+    total_targets = len(user_targets) + len(group_targets)
     sent = 0
     failed = 0
     failed_ids = []
 
-    for chat_id in targets:
+    all_targets = user_targets + group_targets
+    for chat_id in all_targets:
         try:
             await context.bot.send_message(chat_id=chat_id, text=message)
             sent += 1
@@ -845,9 +996,11 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     report = (
         "📢 *Broadcast Report*\n\n"
-        f"👥 Total recipients: `{len(targets)}`\n"
-        f"✅ Successful deliveries: `{sent}`\n"
-        f"❌ Failed deliveries: `{failed}`"
+        f"👤 Total Private Users: `{len(user_targets)}`\n"
+        f"👥 Total Groups: `{len(group_targets)}`\n"
+        f"📡 Total Recipients: `{total_targets}`\n"
+        f"✅ Successful Deliveries: `{sent}`\n"
+        f"❌ Failed Deliveries: `{failed}`"
     )
     if failed_ids:
         report += "\n\n*Failed chat IDs:*\n" + "\n".join(f"`{i}`" for i in failed_ids[:20])
@@ -1363,11 +1516,15 @@ def main():
         app.add_handler(CommandHandler("forcejoinon", forcejoinon))
         app.add_handler(CommandHandler("forcejoinoff", forcejoinoff))
         app.add_handler(CommandHandler("broadcast", broadcast_cmd))
+        app.add_handler(CommandHandler("registergroup", register_group_cmd))
+        app.add_handler(CommandHandler("apistatus", apistatus_cmd))
         app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
         app.add_handler(CallbackQueryHandler(forcejoin_noop_callback, pattern="^forcejoin_noop$"))
         # Stick silences: stickers produce NO reply — not even "Admin only" / "No document".
         # filters.Document.ALL matches only documents (never stickers).
         app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+        # Auto-register groups when bot is added; unregister when bot is removed/kicked.
+        app.add_handler(ChatMemberHandler(my_chat_member_handler, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))
         app.add_error_handler(error_handler)
 
         print("🤖 Bot is running...", flush=True)
