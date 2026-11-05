@@ -1054,14 +1054,29 @@ async def apistatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_tokens = total_tokens  # All tokens in bank are valid/fresh
         invalid_tokens = 0
 
+        # Currently configured per-request tokens (from /setapi, /setapi100, /setapimax, /maxff)
+        current_like_tokens = like_tokens
+
+        # Determine mode name based on current like_tokens setting
+        if current_like_tokens == 400:
+            mode_name = "MAX FF Mode"
+        elif current_like_tokens == 100:
+            mode_name = "100 Token Mode"
+        else:
+            mode_name = "Custom API Mode"
+
         msg = (
             "🔑 *API STATUS*\n\n"
             f"📊 Total API Tokens: `{total_tokens}`\n"
             f"🟢 Active Tokens: `{active_tokens}`\n"
-            f"🔴 Invalid/Disabled: `{invalid_tokens}`\n"
-            f"⚙️ Current API: Token Bank ({total_tokens} tokens)\n"
-            f"📦 Total Capacity: `{capacity_today}` likes/day\n"
-            f"📈 Used Today: `{used_today}`\n"
+            f"🔴 Invalid/Disabled: `{invalid_tokens}`\n\n"
+            f"⚙️ *API CONFIGURATION*\n"
+            f"📦 Total Available Tokens: `{total_tokens}`\n"
+            f"🎯 Currently Set Tokens: `{current_like_tokens}`\n"
+            f"❤️ Expected Likes: ~{current_like_tokens}\n"
+            f"🔧 Current Mode: {mode_name}\n\n"
+            f"📈 *DAILY USAGE*\n"
+            f"📊 Used Today: `{used_today}`\n"
             f"📉 Remaining Today: `{remaining_today}`\n"
             f"❤️ Likes Per Token/Day: `{likes_per_token}`\n"
         )
