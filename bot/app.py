@@ -262,8 +262,8 @@ force_join = False
 force_join_channels = []
 force_join_links = {}
 
-forward_channel_id = ""
-forward_channel_link = ""
+forward_channel_ids = []       # List of channel IDs to forward successful likes to
+forward_channel_links = {}     # Map: channel_id -> invite link
 
 # GitHub persistence
 github_persistence = None
@@ -308,8 +308,16 @@ def load_data():
         force_join = bool(cfg.get('force_join', force_join))
         force_join_channels = list(cfg.get('force_join_channels', force_join_channels) or [])
         force_join_links = dict(cfg.get('force_join_links', force_join_links) or {})
-        forward_channel_id = cfg.get('forward_channel_id', forward_channel_id)
-        forward_channel_link = cfg.get('forward_channel_link', forward_channel_link)
+        forward_channel_ids = list(cfg.get('forward_channel_ids', forward_channel_ids) or [])
+        forward_channel_links = dict(cfg.get('forward_channel_links', forward_channel_links) or {})
+
+        # Backward compatibility: if forward_channel_ids is empty but forward_channel_id exists,
+        # migrate the single value to the list
+        if not forward_channel_ids:
+            old_single = cfg.get('forward_channel_id', '')
+            if old_single:
+                forward_channel_ids = [old_single]
+                print(f"🔄 Migrated forward_channel_id '{old_single}' to forward_channel_ids list", flush=True)
 
     # Migrate stored force-join channel identifiers (e.g. "channel-1" -> "@FFLIKESPRO2")
     try:
@@ -360,8 +368,11 @@ def save_all():
                 'force_join': force_join,
                 'force_join_channels': force_join_channels,
                 'force_join_links': force_join_links,
-                'forward_channel_id': forward_channel_id,
-                'forward_channel_link': forward_channel_link,
+                'forward_channel_ids': forward_channel_ids,
+                'forward_channel_links': forward_channel_links,
+                # Backward compatibility: also save single value
+                'forward_channel_id': forward_channel_ids[0] if forward_channel_ids else '',
+                'forward_channel_link': forward_channel_links.get(forward_channel_ids[0], '') if forward_channel_ids else '',
             }, f, indent=2)
         # Save broadcast list
         try:
@@ -868,18 +879,22 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Reply to the user and capture the sent message (for native forwarding)
     sent_msg = await _respond(result)
 
-    # Forward the EXACT success result message to the configured channel.
+    # Forward the EXACT success result message to ALL configured forward channels.
     # Native forwardMessage preserves the original formatting exactly.
-    if status == 1 and forward_channel_id and sent_msg is not None:
-        try:
-            await context.bot.forward_message(
-                chat_id=forward_channel_id,
-                from_chat_id=sent_msg.chat.id,
-                message_id=sent_msg.message_id,
-            )
-        except Exception as e:
-            # Log the error but never break the successful like operation.
-            print(f"⚠️ Failed to forward successful like to {forward_channel_id}: {e}", flush=True)
+    if status == 1 and sent_msg is not None:
+        for fwd_channel_id in forward_channel_ids:
+            if not fwd_channel_id:
+                continue
+            try:
+                await context.bot.forward_message(
+                    chat_id=fwd_channel_id,
+                    from_chat_id=sent_msg.chat.id,
+                    message_id=sent_msg.message_id,
+                )
+                print(f"✅ Forwarded successful like to {fwd_channel_id}", flush=True)
+            except Exception as e:
+                # Log the error but never break the successful like operation.
+                print(f"⚠️ Failed to forward successful like to {fwd_channel_id}: {e}", flush=True)
 
 # ============ JWT TOKEN UPLOAD HANDLER ============
 # Broadcast list file
