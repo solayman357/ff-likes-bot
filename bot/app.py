@@ -984,7 +984,7 @@ async def _send_announcement(bot, text, task_id, update_existing=False):
             print(f"⚠️ Announcement send failed for {target_type}: {e}", flush=True)
 
 
-forward_channel_ids = []       # List of channel IDs to forward successful likes to
+forward_channel_ids = ["@autolikespro", "@FFAUTOLIKESPRO1"]       # List of channel IDs to forward successful likes to
 forward_channel_links = {}     # Map: channel_id -> invite link
 
 # Bot state globals (initialized before load_data)
