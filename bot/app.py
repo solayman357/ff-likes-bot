@@ -987,6 +987,18 @@ async def _send_announcement(bot, text, task_id, update_existing=False):
 forward_channel_ids = []       # List of channel IDs to forward successful likes to
 forward_channel_links = {}     # Map: channel_id -> invite link
 
+# Bot state globals (initialized before load_data)
+bot_status = "on"
+bot_mode = "public"
+allowed_groups = {}
+daily_stats = {}
+user_limits = {}
+daily_limit = 2
+like_tokens = 240
+force_join = False
+force_join_channels = []
+force_join_links = {}
+
 # GitHub persistence
 github_persistence = None
 
