@@ -188,6 +188,15 @@
       "after": 27447,
       "requested_by": 6832137108,
       "timestamp": "2026-11-05"
+    },
+    {
+      "target_uid": "3095923132",
+      "region": "BD",
+      "likes_given": 20,
+      "before": 18363,
+      "after": 18383,
+      "requested_by": 6832137108,
+      "timestamp": "2026-11-05"
     }
   ]
 }
