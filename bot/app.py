@@ -223,7 +223,12 @@ def is_group_allowed_db(chat_id, chat_type):
 
 
 def sync_groups_from_broadcast():
-    """Sync existing broadcast chats into the SQLite database."""
+    """Sync existing broadcast chats into the SQLite database.
+
+    Preserves existing ALLOWED/BLOCKED/INACTIVE status — does NOT overwrite
+    permissions. Only inserts new groups (defaulting to 'allowed') or updates
+    title/type fields for existing ones.
+    """
     try:
         data = _load_broadcast_data()
         chats = data.get("chats", {})
@@ -237,7 +242,7 @@ def sync_groups_from_broadcast():
                 chat_id=chat_id,
                 chat_title=info.get("title"),
                 chat_type=info.get("chat_type"),
-                status='allowed',
+                # Do NOT pass status — preserve existing ALLOWED/BLOCKED/INACTIVE
                 bot_member_status='member'
             )
             count += 1
@@ -975,6 +980,19 @@ async def my_chat_member_handler(update: Update, context: ContextTypes.DEFAULT_T
             print(f"✅ Auto-registered chat {chat.id} ({chat.type}) via my_chat_member", flush=True)
             return
 
+        # Bot was already a member but chat info changed (title/username update)
+        if new_s in ("member", "administrator", "creator") and old_s in ("member", "administrator", "creator"):
+            upsert_group(
+                chat_id=chat.id,
+                chat_title=getattr(chat, "title", None),
+                chat_username=getattr(chat, "username", None),
+                chat_type=chat.type,
+                # Do NOT pass status — preserve existing ALLOWED/BLOCKED/INACTIVE
+                bot_member_status=new_s
+            )
+            print(f"🔄 Updated chat {chat.id} ({chat.type}) info via my_chat_member", flush=True)
+            return
+
         # Bot was kicked/left — mark as inactive in DB (don't delete record)
         if new_s in ("left", "kicked") and old_s in ("member", "administrator", "creator"):
             remove_from_broadcast(chat.id)
@@ -1012,21 +1030,59 @@ def remove_from_broadcast(chat_id):
 
 
 async def register_group_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manually register the current group for broadcasts. Admin only."""
+    """Manually register a group for broadcasts and SQLite DB. Admin only.
+
+    Usage: /registergroup              (registers current group)
+           /registergroup <CHAT_ID>    (registers a group by its chat ID)
+    """
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
-    chat = update.effective_chat
-    if chat is None or chat.type == "private":
-        await reply(update, "❌ Use this command in a group/supergroup.")
-        return
-    add_to_broadcast(chat.id, chat.type, getattr(chat, "title", None))
+
+    # Determine target chat_id
+    if context.args and context.args[0].lstrip('-').isdigit():
+        # Manual registration by chat ID
+        target_chat_id = int(context.args[0])
+        try:
+            chat = await context.bot.get_chat(target_chat_id)
+            chat_title = getattr(chat, "title", None)
+            chat_username = getattr(chat, "username", None)
+            chat_type = chat.type
+        except Exception as e:
+            await reply(update, f"❌ Could not fetch chat `{target_chat_id}`:\n`{type(e).__name__}: {e}`")
+            return
+    else:
+        # Register current chat
+        chat = update.effective_chat
+        if chat is None or chat.type == "private":
+            await reply(update, "❌ Use this command in a group/supergroup, or provide a CHAT_ID.")
+            return
+        target_chat_id = chat.id
+        chat_title = getattr(chat, "title", None)
+        chat_username = getattr(chat, "username", None)
+        chat_type = chat.type
+
+    # Register in broadcast list
+    add_to_broadcast(target_chat_id, chat_type, chat_title)
+
+    # Register in SQLite DB (preserves existing ALLOWED/BLOCKED status)
+    upsert_group(
+        chat_id=target_chat_id,
+        chat_title=chat_title,
+        chat_username=chat_username,
+        chat_type=chat_type,
+        # Do NOT pass status — preserve existing ALLOWED/BLOCKED/INACTIVE
+        bot_member_status='member'
+    )
+
     await reply(
         update,
-        f"✅ *Group Registered for Broadcast*\n\n"
-        f"📢 Chat: `{chat.id}`\n"
-        f"📝 Title: {getattr(chat, 'title', 'Unknown')}\n"
-        f"🔢 Total groups in broadcast: `{len(_load_broadcast_data().get('chats', {}))}`"
+        f"✅ *Group Registered*\n\n"
+        f"📢 Chat ID: `{target_chat_id}`\n"
+        f"📝 Title: {chat_title or 'Unknown'}\n"
+        f"📛 Username: {chat_username or 'No username'}\n"
+        f"📁 Type: {chat_type}\n"
+        f"🔢 Total groups in DB: `{len(get_all_groups())}`"
     )
 
 
@@ -1160,7 +1216,7 @@ async def groups_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for g in page_groups:
         cid = g['chat_id']
         title = g.get('chat_title') or 'Unknown'
-        username = g.get('chat_username') or '-'
+        username = g.get('chat_username') or 'No username'
         ctype = g.get('chat_type') or 'group'
         status = g.get('status', 'allowed')
         added = (g.get('added_at') or 'Unknown')[:10]
@@ -1171,7 +1227,7 @@ async def groups_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += (
             f"{status_emoji} *{title}*\n"
             f"   ID: `{cid}` | Type: {ctype} | Status: {status_text}\n"
-            f"   Username: @{username} | Added: {added}\n\n"
+            f"   Username: {username} | Added: {added}\n\n"
         )
 
     # Build inline keyboard
@@ -1252,17 +1308,50 @@ async def blockgroup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def syncgroups_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sync groups from broadcast list into the SQLite database. Admin only."""
+    """Sync groups from broadcast list into the SQLite database. Admin only.
+
+    Also attempts to fetch fresh chat info via get_chat() for each registered
+    broadcast chat so titles and usernames stay up to date.
+    """
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
-    count = sync_groups_from_broadcast()
+
+    # Step 1: Sync from broadcast list (preserves existing ALLOWED/BLOCKED status)
+    synced = sync_groups_from_broadcast()
+
+    # Step 2: Try to refresh chat info via get_chat() for each broadcast chat
+    data = _load_broadcast_data()
+    chats = data.get("chats", {})
+    refreshed = 0
+    for cid, info in chats.items():
+        try:
+            chat_id = int(cid)
+        except (TypeError, ValueError):
+            continue
+        try:
+            chat = await context.bot.get_chat(chat_id)
+            upsert_group(
+                chat_id=chat_id,
+                chat_title=getattr(chat, "title", None) or info.get("title"),
+                chat_username=getattr(chat, "username", None),
+                chat_type=chat.type,
+                # Do NOT pass status — preserve existing ALLOWED/BLOCKED/INACTIVE
+                bot_member_status='member'
+            )
+            refreshed += 1
+        except Exception as e:
+            print(f"⚠️ Could not refresh chat {chat_id}: {e}", flush=True)
+
     total = len(get_all_groups())
     await reply(
         update,
         f"🔄 *Group Sync Complete*\n\n"
-        f"Synced: `{count}` group(s) from broadcast list\n"
-        f"Total groups in DB: `{total}`"
+        f"Synced from broadcast: `{synced}`\n"
+        f"Refreshed via get_chat: `{refreshed}`\n"
+        f"Total groups in DB: `{total}`\n\n"
+        f"⚠️ Telegram does not provide a list of all groups the bot joined.\n"
+        f"Use `/registergroup <CHAT_ID>` to manually add missing groups."
     )
 
 
@@ -1698,7 +1787,7 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ No registered users or groups yet.\n\n"
             "Recipients are added automatically when the bot is added to a group "
             "(my_chat_member) or when someone sends /start /info /like. "
-            "Admins can also use /registergroup in a group."
+            "Admins can also use /registergroup <CHAT_ID> to manually add groups."
         )
         return
 
