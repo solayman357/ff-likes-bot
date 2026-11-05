@@ -1,5 +1,11 @@
 {
   "status": "on",
-  "mode": "private",
-  "limit": 2
+  "mode": "public",
+  "limit": 2,
+  "like_tokens": 240,
+  "force_join": false,
+  "force_join_channels": [],
+  "force_join_links": {},
+  "forward_channel_id": "@autolikespro",
+  "forward_channel_link": "https://t.me/autolikespro"
 }
