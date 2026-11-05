@@ -116,6 +116,12 @@ def upsert_group(chat_id, chat_title=None, chat_username=None, chat_type=None,
 
             conn.commit()
             conn.close()
+        # Queue for immediate GitHub sync
+        if github_persistence:
+            try:
+                github_persistence.queue_push('groups')
+            except Exception as e:
+                print(f"⚠️ GitHub queue failed for groups: {e}", flush=True)
     except Exception as e:
         print(f"⚠️ upsert_group failed: {e}", flush=True)
 
@@ -133,6 +139,12 @@ def set_group_status(chat_id, status):
             conn.commit()
             changed = cur.rowcount > 0
             conn.close()
+        # Queue for immediate GitHub sync
+        if github_persistence:
+            try:
+                github_persistence.queue_push('groups')
+            except Exception as e:
+                print(f"⚠️ GitHub queue failed for groups: {e}", flush=True)
         return changed
     except Exception as e:
         print(f"⚠️ set_group_status failed: {e}", flush=True)
@@ -340,7 +352,7 @@ def save_all():
 
     # Queue for GitHub sync (background, retried, never blocks the bot).
     if github_persistence:
-        for key in ('allowed', 'stats', 'users', 'config'):
+        for key in ('allowed', 'stats', 'users', 'config', 'groups'):
             try:
                 github_persistence.queue_push(key)
             except Exception as e:
