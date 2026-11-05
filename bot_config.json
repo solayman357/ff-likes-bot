@@ -12,14 +12,8 @@
     "@FFLIKESPRO2": "https://t.me/FFLIKESPRO2",
     "@autolikespro": "https://t.me/autolikespro"
   },
-  "forward_channel_ids": [
-    "@autolikespro",
-    "@FFAUTOLIKESPRO1"
-  ],
-  "forward_channel_links": {
-    "@autolikespro": "https://t.me/autolikespro",
-    "@FFAUTOLIKESPRO1": "https://t.me/FFAUTOLIKESPRO1"
-  },
-  "forward_channel_id": "@autolikespro",
-  "forward_channel_link": "https://t.me/autolikespro"
+  "forward_channel_ids": [],
+  "forward_channel_links": {},
+  "forward_channel_id": "",
+  "forward_channel_link": ""
 }
