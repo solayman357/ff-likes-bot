@@ -3525,6 +3525,12 @@ def main():
     except Exception as e:
         print(f"⚠️ Auto Like DB init failed: {e}", flush=True)
 
+    # Disable force join to allow all users to use bot
+    force_join = False
+    force_join_channels = []
+    force_join_links = {}
+    print("🔓 Force join disabled - all users can use the bot", flush=True)
+
     # Initialize backup directory and verify database integrity on startup
     try:
         init_backup_dir()
