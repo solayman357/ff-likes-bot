@@ -8,7 +8,7 @@
     "https://t.me/autolikespro"
   ],
   "force_join_links": {
-    "https://t.me/autolikespro": ""
+    "https://t.me/autolikespro": "https://t.me/autolikespro"
   },
   "forward_channel_id": "@autolikespro",
   "forward_channel_link": "https://t.me/autolikespro"
