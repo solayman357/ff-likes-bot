@@ -26,6 +26,10 @@ bot/allowed_groups.json
 bot/daily_stats.json
 bot/user_limits.json
 bot/bot_config.json
+bot/group_management.db
+bot/broadcast_list.json
+bot/successful_likes.json
+bot/backup_status.json
 data/guests/
 
 # OS

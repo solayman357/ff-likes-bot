@@ -347,12 +347,23 @@ def save_all():
                 'forward_channel_id': forward_channel_id,
                 'forward_channel_link': forward_channel_link,
             }, f, indent=2)
+        # Save broadcast list
+        try:
+            with open(BROADCAST_FILE, 'w') as f:
+                json.dump(_load_broadcast_data(), f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"⚠️ save_all broadcast write failed: {e}", flush=True)
+        # Save successful likes log
+        try:
+            _save_successful_likes()
+        except Exception as e:
+            print(f"⚠️ save_all likes write failed: {e}", flush=True)
     except Exception as e:
         print(f"⚠️ save_all local write failed: {e}", flush=True)
 
     # Queue for GitHub sync (background, retried, never blocks the bot).
     if github_persistence:
-        for key in ('allowed', 'stats', 'users', 'config', 'groups'):
+        for key in ('allowed', 'stats', 'users', 'config', 'groups', 'broadcast', 'likes'):
             try:
                 github_persistence.queue_push(key)
             except Exception as e:
@@ -1255,6 +1266,147 @@ async def syncgroups_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+
+
+
+# ============ DATABASE INTEGRITY & BACKUP ============
+
+BACKUP_DIR = "backups"
+BACKUP_META_FILE = "backup_status.json"
+
+
+def init_backup_dir():
+    """Ensure the backup directory exists."""
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+    except Exception as e:
+        print(f"⚠️ Backup dir init failed: {e}", flush=True)
+
+
+def load_backup_status():
+    """Load backup metadata."""
+    try:
+        with open(BACKUP_META_FILE, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return {"last_backup": None, "backup_count": 0, "last_error": None}
+
+
+def save_backup_status(status):
+    """Save backup metadata."""
+    try:
+        with open(BACKUP_META_FILE, 'w') as f:
+            json.dump(status, f, indent=2)
+    except Exception as e:
+        print(f"⚠️ Backup status write failed: {e}", flush=True)
+
+
+def verify_database_integrity():
+    """Verify SQLite database integrity. Returns (ok, message)."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(GROUP_DB_FILE)
+            cur = conn.cursor()
+            cur.execute("PRAGMA integrity_check")
+            result = cur.fetchone()
+            conn.close()
+        if result and result[0] == "ok":
+            return True, "Database integrity check passed"
+        return False, f"Integrity check failed: {result}"
+    except Exception as e:
+        return False, f"Integrity check error: {e}"
+
+
+def create_backup():
+    """Create a timestamped backup of all persistent data files."""
+    init_backup_dir()
+    status = load_backup_status()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_files = []
+
+    files_to_backup = [
+        DATA_FILES['allowed'],
+        DATA_FILES['stats'],
+        DATA_FILES['users'],
+        DATA_FILES['config'],
+        BROADCAST_FILE,
+        LIKE_LOG_FILE,
+        GROUP_DB_FILE,
+    ]
+
+    for src in files_to_backup:
+        if not os.path.exists(src):
+            continue
+        try:
+            dst = os.path.join(BACKUP_DIR, f"{timestamp}_{os.path.basename(src)}")
+            import shutil
+            shutil.copy2(src, dst)
+            backup_files.append(os.path.basename(src))
+        except Exception as e:
+            print(f"⚠️ Backup copy failed for {src}: {e}", flush=True)
+
+    status["last_backup"] = timestamp
+    status["backup_count"] = status.get("backup_count", 0) + 1
+    status["last_error"] = None
+    status["files"] = backup_files
+    save_backup_status(status)
+
+    # Also push backup status to GitHub
+    if github_persistence:
+        try:
+            github_persistence.queue_push('config')
+        except Exception:
+            pass
+
+    return timestamp, backup_files
+
+
+async def backup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Create a database backup. Admin only."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+
+    # Verify integrity first
+    ok, msg = verify_database_integrity()
+    if not ok:
+        await reply(update, f"❌ Database integrity check failed:\n{msg}")
+        return
+
+    try:
+        timestamp, files = create_backup()
+        await reply(
+            update,
+            f"✅ *Backup Created*\n\n"
+            f"🕒 Timestamp: `{timestamp}`\n"
+            f"📁 Files: `{', '.join(files)}`\n"
+            f"📍 Location: `{BACKUP_DIR}/`"
+        )
+    except Exception as e:
+        await reply(update, f"❌ Backup failed: `{type(e).__name__}: {e}`")
+
+
+async def backupstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show backup status. Admin only."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+
+    status = load_backup_status()
+    ok, integrity_msg = verify_database_integrity()
+
+    await reply(
+        update,
+        f"💾 *Backup Status*\n\n"
+        f"🔍 Integrity: {'✅ OK' if ok else '❌ FAILED'}\n"
+        f"   {integrity_msg}\n"
+        f"🕒 Last Backup: `{status.get('last_backup') or 'Never'}`\n"
+        f"📦 Backup Count: `{status.get('backup_count', 0)}`\n"
+        f"❌ Last Error: `{status.get('last_error') or 'None'}`\n"
+        f"📁 Backup Dir: `{BACKUP_DIR}/`"
+    )
+
+
 async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline button callbacks for group management."""
     query = update.callback_query
@@ -2062,6 +2214,14 @@ def main():
     except Exception as e:
         print(f"❌ load_data failed: {e}", flush=True)
 
+    # Initialize backup directory and verify database integrity on startup
+    try:
+        init_backup_dir()
+        ok, msg = verify_database_integrity()
+        print(f"💾 Backup dir initialized. DB Integrity: {'✅ OK' if ok else '❌ FAILED'} - {msg}", flush=True)
+    except Exception as e:
+        print(f"⚠️ Backup/init check failed: {e}", flush=True)
+
     # Build the Telegram application
     try:
         request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
@@ -2102,6 +2262,9 @@ def main():
         app.add_handler(CommandHandler("allowgroup", allowgroup_cmd))
         app.add_handler(CommandHandler("blockgroup", blockgroup_cmd))
         app.add_handler(CommandHandler("syncgroups", syncgroups_cmd))
+        # Database backup commands
+        app.add_handler(CommandHandler("backup", backup_cmd))
+        app.add_handler(CommandHandler("backupstatus", backupstatus_cmd))
         app.add_handler(CallbackQueryHandler(group_callback_handler, pattern="^(group_allow|group_block|group_details|groups_page)_"))
         app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
         app.add_handler(CallbackQueryHandler(forcejoin_noop_callback, pattern="^forcejoin_noop$"))

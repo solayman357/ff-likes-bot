@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 
 # Only these files are ever read from / written to GitHub.
 # key -> filename inside the bot directory
+# Files that must be treated as binary (no JSON validation)
+BINARY_FILES = {"group_management.db"}
+
+# Only these files are ever read from / written to GitHub.
+# key -> filename inside the bot directory
 PERSISTED_FILES: Dict[str, str] = {
     "allowed": "allowed_groups.json",
     "stats": "daily_stats.json",
@@ -243,7 +248,17 @@ class GitHubPersistence:
             data, _ = self._get_remote_file(filename)
             if data is None:
                 continue
-            # Validate before overwriting a working local file.
+            # For binary files (SQLite db), skip JSON validation.
+            if filename in BINARY_FILES:
+                try:
+                    target = self.bot_dir / filename
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(data)
+                    restored += 1
+                except Exception as exc:
+                    logger.warning("Could not write binary %s: %s", filename, exc)
+                continue
+            # Validate JSON files before overwriting a working local file.
             try:
                 json.loads(data.decode("utf-8"))
             except Exception as exc:
