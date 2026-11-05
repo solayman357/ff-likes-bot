@@ -45,7 +45,195 @@ DATA_FILES = {
 
 # Token upload: bot forwards tokens to API's /upload-tokens endpoint
 
-# ============ GLOBALS ============
+# ============ GROUP MANAGEMENT (SQLite) ============
+import sqlite3
+
+GROUP_DB_FILE = "group_management.db"
+GROUP_DB_LOCK = threading.Lock()
+
+
+def init_group_db():
+    """Initialize the SQLite group management database."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(GROUP_DB_FILE)
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS groups (
+                    chat_id INTEGER PRIMARY KEY,
+                    chat_title TEXT,
+                    chat_username TEXT,
+                    chat_type TEXT,
+                    status TEXT DEFAULT 'allowed',
+                    added_at TEXT,
+                    updated_at TEXT,
+                    bot_member_status TEXT DEFAULT 'member',
+                    added_by INTEGER
+                )
+            """)
+            conn.commit()
+            conn.close()
+        print("✅ Group management SQLite DB initialized", flush=True)
+    except Exception as e:
+        print(f"⚠️ Group DB init failed: {e}", flush=True)
+
+
+def upsert_group(chat_id, chat_title=None, chat_username=None, chat_type=None,
+                 status=None, added_by=None, bot_member_status=None):
+    """Add or update a group in the SQLite database."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(GROUP_DB_FILE)
+            cur = conn.cursor()
+            now = datetime.now().isoformat()
+
+            # Check if group exists
+            cur.execute("SELECT chat_id, status, added_at FROM groups WHERE chat_id = ?", (chat_id,))
+            row = cur.fetchone()
+
+            if row is None:
+                # New group
+                cur.execute(
+                    "INSERT INTO groups (chat_id, chat_title, chat_username, chat_type, status, added_at, updated_at, bot_member_status, added_by) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (chat_id, chat_title, chat_username, chat_type,
+                     status or 'allowed', now, now, bot_member_status or 'member', added_by)
+                )
+            else:
+                # Update existing group - preserve added_at, only update fields provided
+                existing_status = row[1]
+                existing_added_at = row[2]
+                new_status = status if status is not None else existing_status
+                cur.execute(
+                    "UPDATE groups SET chat_title = COALESCE(?, chat_title), chat_username = COALESCE(?, chat_username), "
+                    "chat_type = COALESCE(?, chat_type), status = ?, updated_at = ?, "
+                    "bot_member_status = COALESCE(?, bot_member_status) WHERE chat_id = ?",
+                    (chat_title, chat_username, chat_type, new_status, now,
+                     bot_member_status, chat_id)
+                )
+                # Ensure added_at is preserved
+                cur.execute("UPDATE groups SET added_at = ? WHERE chat_id = ?", (existing_added_at, chat_id))
+
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        print(f"⚠️ upsert_group failed: {e}", flush=True)
+
+
+def set_group_status(chat_id, status):
+    """Set the status (allowed/blocked/inactive) of a group."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(GROUP_DB_FILE)
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE groups SET status = ?, updated_at = ? WHERE chat_id = ?",
+                (status, datetime.now().isoformat(), chat_id)
+            )
+            conn.commit()
+            changed = cur.rowcount > 0
+            conn.close()
+        return changed
+    except Exception as e:
+        print(f"⚠️ set_group_status failed: {e}", flush=True)
+        return False
+
+
+def get_all_groups():
+    """Get all groups from the database."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(GROUP_DB_FILE)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM groups ORDER BY added_at DESC")
+            rows = [dict(r) for r in cur.fetchall()]
+            conn.close()
+        return rows
+    except Exception as e:
+        print(f"⚠️ get_all_groups failed: {e}", flush=True)
+        return []
+
+
+def get_group_count_by_status():
+    """Get counts of groups by status."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(GROUP_DB_FILE)
+            cur = conn.cursor()
+            cur.execute("SELECT status, COUNT(*) as cnt FROM groups GROUP BY status")
+            result = {}
+            for row in cur.fetchall():
+                result[row[0]] = row[1]
+            conn.close()
+        return result
+    except Exception as e:
+        print(f"⚠️ get_group_count_by_status failed: {e}", flush=True)
+        return {}
+
+
+def get_group_detail(chat_id):
+    """Get details of a single group."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(GROUP_DB_FILE)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM groups WHERE chat_id = ?", (chat_id,))
+            row = cur.fetchone()
+            conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"⚠️ get_group_detail failed: {e}", flush=True)
+        return None
+
+
+def is_group_allowed_db(chat_id, chat_type):
+    """Check if a group is allowed based on SQLite DB status."""
+    if chat_type == "private":
+        return True
+    if bot_mode == "public":
+        return True
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(GROUP_DB_FILE)
+            cur = conn.cursor()
+            cur.execute("SELECT status FROM groups WHERE chat_id = ?", (chat_id,))
+            row = cur.fetchone()
+            conn.close()
+        if row is None:
+            # Group not in DB - default to allowed if public mode
+            return bot_mode == "public"
+        return row[0] == 'allowed'
+    except Exception as e:
+        print(f"⚠️ is_group_allowed_db failed: {e}", flush=True)
+        return bot_mode == "public"
+
+
+def sync_groups_from_broadcast():
+    """Sync existing broadcast chats into the SQLite database."""
+    try:
+        data = _load_broadcast_data()
+        chats = data.get("chats", {})
+        count = 0
+        for cid, info in chats.items():
+            try:
+                chat_id = int(cid)
+            except (TypeError, ValueError):
+                continue
+            upsert_group(
+                chat_id=chat_id,
+                chat_title=info.get("title"),
+                chat_type=info.get("chat_type"),
+                status='allowed',
+                bot_member_status='member'
+            )
+            count += 1
+        print(f"✅ Synced {count} groups from broadcast list to SQLite", flush=True)
+        return count
+    except Exception as e:
+        print(f"⚠️ sync_groups_from_broadcast failed: {e}", flush=True)
+        return 0
 bot_status = "on"
 bot_mode = "public"
 allowed_groups = {}
@@ -119,6 +307,16 @@ def load_data():
     print(f"⚙️ Loaded settings: status={bot_status} mode={bot_mode} "
           f"limit={daily_limit} like_tokens={like_tokens} "
           f"force_join={force_join} channels={len(force_join_channels)}", flush=True)
+
+    # Initialize group management SQLite DB and sync existing broadcast groups
+    try:
+        init_group_db()
+        synced = sync_groups_from_broadcast()
+        if synced:
+            print(f"📦 Group DB: {synced} group(s) synced from broadcast list", flush=True)
+    except Exception as e:
+        print(f"⚠️ Group DB init/sync failed: {e}", flush=True)
+
 
 def save_all():
     try:
@@ -323,7 +521,11 @@ def is_group_allowed(chat_id, chat_type):
         return True
     if bot_mode == "public":
         return True
-    return str(chat_id) in allowed_groups
+    # Check SQLite DB first (authoritative group status)
+    db_allowed = is_group_allowed_db(chat_id, chat_type)
+    # Also check legacy allowed_groups for backward compatibility
+    legacy_allowed = str(chat_id) in allowed_groups
+    return db_allowed or legacy_allowed
 
 async def reset_midnight(context: ContextTypes.DEFAULT_TYPE):
     global user_limits
@@ -414,6 +616,10 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/forcejoinstatus` – Show force-join configuration\n"
         "`/forcejoinon` / `/forcejoinoff` – Enable/disable force join\n"
         "`/broadcast <message>` – Send message to all users and groups"
+        "`/groups` – List and manage all groups (pagination)\n"
+        "`/allowgroup <chat_id>` – Allow a group\n"
+        "`/blockgroup <chat_id>` – Block a group\n"
+        "`/syncgroups` – Sync groups from broadcast list"
     )
     await reply(update, msg)
 
@@ -734,13 +940,31 @@ async def my_chat_member_handler(update: Update, context: ContextTypes.DEFAULT_T
         # Bot was added to or became admin/member in a group/supergroup/channel
         if new_s in ("member", "administrator", "creator") and old_s not in ("member", "administrator", "creator"):
             add_to_broadcast(chat.id, chat.type, getattr(chat, "title", None))
+            upsert_group(
+                chat_id=chat.id,
+                chat_title=getattr(chat, "title", None),
+                chat_username=getattr(chat, "username", None),
+                chat_type=chat.type,
+                status='allowed',
+                bot_member_status=new_s,
+                added_by=update.effective_user.id if update.effective_user else None
+            )
             print(f"✅ Auto-registered chat {chat.id} ({chat.type}) via my_chat_member", flush=True)
             return
 
-        # Bot was kicked/left — remove from broadcast list
+        # Bot was kicked/left — mark as inactive in DB (don't delete record)
         if new_s in ("left", "kicked") and old_s in ("member", "administrator", "creator"):
             remove_from_broadcast(chat.id)
-            print(f"🗑️ Removed chat {chat.id} ({chat.type}) from broadcast (bot removed)", flush=True)
+            set_group_status(chat.id, 'inactive')
+            upsert_group(
+                chat_id=chat.id,
+                chat_title=getattr(chat, "title", None),
+                chat_username=getattr(chat, "username", None),
+                chat_type=chat.type,
+                status='inactive',
+                bot_member_status=new_s
+            )
+            print(f"🗑️ Marked chat {chat.id} ({chat.type}) as inactive (bot removed)", flush=True)
             return
     except Exception as e:
         print(f"⚠️ my_chat_member_handler failed: {e}", flush=True)
@@ -843,6 +1067,331 @@ async def apistatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply(update, "❌ API request timed out.")
     except Exception as e:
         await reply(update, f"❌ Error fetching API status: `{type(e).__name__}`")
+
+
+# ============ GROUP MANAGEMENT COMMANDS ============
+
+async def groups_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all groups with pagination and ALLOW/BLOCK/DETAILS buttons. Admin only."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+
+    # Parse page number from args
+    page = 0
+    if context.args and context.args[0].isdigit():
+        page = int(context.args[0])
+    if page < 0:
+        page = 0
+
+    groups = get_all_groups()
+    if not groups:
+        counts = get_group_count_by_status()
+        await reply(
+            update,
+            "👥 *Group Management*\n\n"
+            f"📊 Total Groups: `{counts.get('allowed', 0) + counts.get('blocked', 0) + counts.get('inactive', 0)}`\n"
+            f"🟢 Allowed: `{counts.get('allowed', 0)}`\n"
+            f"🔴 Blocked: `{counts.get('blocked', 0)}`\n"
+            f"⚪ Inactive: `{counts.get('inactive', 0)}`\n\n"
+            "No groups registered yet. Use `/syncgroups` to import existing groups, "
+            "or the bot will auto-register groups when added via my_chat_member."
+        )
+        return
+
+    counts = get_group_count_by_status()
+    total = len(groups)
+    per_page = 10
+    total_pages = (total + per_page - 1) // per_page
+    if page >= total_pages:
+        page = total_pages - 1
+
+    start = page * per_page
+    end = start + per_page
+    page_groups = groups[start:end]
+
+    # Build header
+    msg = (
+        "👥 *Group Management*\n\n"
+        f"📊 Total: `{total}` | 🟢 Allowed: `{counts.get('allowed', 0)}` | "
+        f"🔴 Blocked: `{counts.get('blocked', 0)}` | ⚪ Inactive: `{counts.get('inactive', 0)}`\n"
+        f"📄 Page `{page + 1}` of `{total_pages}`\n\n"
+    )
+
+    # Build group entries
+    for g in page_groups:
+        cid = g['chat_id']
+        title = g.get('chat_title') or 'Unknown'
+        username = g.get('chat_username') or '-'
+        ctype = g.get('chat_type') or 'group'
+        status = g.get('status', 'allowed')
+        added = (g.get('added_at') or 'Unknown')[:10]
+
+        status_emoji = "🟢" if status == 'allowed' else ("🔴" if status == 'blocked' else "⚪")
+        status_text = status.upper()
+
+        msg += (
+            f"{status_emoji} *{title}*\n"
+            f"   ID: `{cid}` | Type: {ctype} | Status: {status_text}\n"
+            f"   Username: @{username} | Added: {added}\n\n"
+        )
+
+    # Build inline keyboard
+    keyboard = []
+    for g in page_groups:
+        cid = g['chat_id']
+        status = g.get('status', 'allowed')
+        allow_btn_text = "✅ ALLOW" if status != 'allowed' else "✅ ALLOWED"
+        block_btn_text = "🔴 BLOCK" if status != 'blocked' else "🔴 BLOCKED"
+        keyboard.append([
+            InlineKeyboardButton(allow_btn_text, callback_data=f"group_allow_{cid}"),
+            InlineKeyboardButton(block_btn_text, callback_data=f"group_block_{cid}"),
+            InlineKeyboardButton("ℹ️ DETAILS", callback_data=f"group_details_{cid}"),
+        ])
+
+    # Pagination buttons
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"groups_page_{page - 1}"))
+    if end < total:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"groups_page_{page + 1}"))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await reply(update, msg, reply_markup=reply_markup)
+
+
+async def allowgroup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Allow a group by chat ID. Admin only."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    if not context.args or not context.args[0].lstrip('-').isdigit():
+        await reply(update, "❌ Usage: `/allowgroup <chat_id>`\nExample: `/allowgroup -1001234567890`")
+        return
+    chat_id = int(context.args[0])
+    set_group_status(chat_id, 'allowed')
+    # Also add to legacy allowed_groups for backward compat
+    allowed_groups[str(chat_id)] = {'name': '', 'by': update.effective_user.id, 'date': today_str()}
+    save_all()
+    detail = get_group_detail(chat_id)
+    title = detail.get('chat_title', 'Unknown') if detail else 'Unknown'
+    await reply(
+        update,
+        f"✅ *Group Allowed*\n\n"
+        f"📢 Chat ID: `{chat_id}`\n"
+        f"📝 Title: {title}\n"
+        f"Users can now use like commands in this group."
+    )
+
+
+async def blockgroup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Block a group by chat ID. Admin only."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    if not context.args or not context.args[0].lstrip('-').isdigit():
+        await reply(update, "❌ Usage: `/blockgroup <chat_id>`\nExample: `/blockgroup -1001234567890`")
+        return
+    chat_id = int(context.args[0])
+    set_group_status(chat_id, 'blocked')
+    # Remove from legacy allowed_groups for backward compat
+    allowed_groups.pop(str(chat_id), None)
+    save_all()
+    detail = get_group_detail(chat_id)
+    title = detail.get('chat_title', 'Unknown') if detail else 'Unknown'
+    await reply(
+        update,
+        f"🔴 *Group Blocked*\n\n"
+        f"📢 Chat ID: `{chat_id}`\n"
+        f"📝 Title: {title}\n"
+        f"Normal users cannot use like commands in this group. Admin commands still work."
+    )
+
+
+async def syncgroups_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sync groups from broadcast list into the SQLite database. Admin only."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    count = sync_groups_from_broadcast()
+    total = len(get_all_groups())
+    await reply(
+        update,
+        f"🔄 *Group Sync Complete*\n\n"
+        f"Synced: `{count}` group(s) from broadcast list\n"
+        f"Total groups in DB: `{total}`"
+    )
+
+
+async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle inline button callbacks for group management."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        try:
+            await query.edit_message_text("❌ Admin only")
+        except Exception:
+            pass
+        return
+
+    data = query.data
+
+    # Parse callback: group_allow_{chat_id}, group_block_{chat_id}, group_details_{chat_id}, groups_page_{page}
+    parts = data.split("_")
+    if len(parts) < 3:
+        return
+
+    action = parts[0] + "_" + parts[1]  # group_allow, group_block, group_details, groups_page
+
+    if action == "group_allow":
+        chat_id = int(parts[2])
+        set_group_status(chat_id, 'allowed')
+        allowed_groups[str(chat_id)] = {'name': '', 'by': user_id, 'date': today_str()}
+        save_all()
+        detail = get_group_detail(chat_id)
+        title = detail.get('chat_title', 'Unknown') if detail else 'Unknown'
+        try:
+            await query.edit_message_text(
+                f"✅ *Group Allowed*\n\n"
+                f"📢 Chat ID: `{chat_id}`\n"
+                f"📝 Title: {title}\n"
+                f"Users can now use like commands in this group.",
+                parse_mode='Markdown'
+            )
+        except BadRequest as e:
+            if "Message is not modified" not in str(e):
+                raise
+
+    elif action == "group_block":
+        chat_id = int(parts[2])
+        set_group_status(chat_id, 'blocked')
+        allowed_groups.pop(str(chat_id), None)
+        save_all()
+        detail = get_group_detail(chat_id)
+        title = detail.get('chat_title', 'Unknown') if detail else 'Unknown'
+        try:
+            await query.edit_message_text(
+                f"🔴 *Group Blocked*\n\n"
+                f"📢 Chat ID: `{chat_id}`\n"
+                f"📝 Title: {title}\n"
+                f"Normal users cannot use like commands. Admin commands still work.",
+                parse_mode='Markdown'
+            )
+        except BadRequest as e:
+            if "Message is not modified" not in str(e):
+                raise
+
+    elif action == "group_details":
+        chat_id = int(parts[2])
+        detail = get_group_detail(chat_id)
+        if not detail:
+            try:
+                await query.edit_message_text("❌ Group not found in database.")
+            except Exception:
+                pass
+            return
+        status = detail.get('status', 'allowed')
+        status_emoji = "🟢" if status == 'allowed' else ("🔴" if status == 'blocked' else "⚪")
+        added = (detail.get('added_at') or 'Unknown')[:10]
+        updated = (detail.get('updated_at') or 'Unknown')[:16]
+        try:
+            await query.edit_message_text(
+                f"ℹ️ *Group Details*\n\n"
+                f"📢 Title: {detail.get('chat_title', 'Unknown')}\n"
+                f"🆔 Chat ID: `{detail.get('chat_id')}`\n"
+                f"📛 Username: @{detail.get('chat_username') or '-'}\n"
+                f"📁 Type: {detail.get('chat_type', 'group')}\n"
+                f"{status_emoji} Status: {status.upper()}\n"
+                f"🤖 Bot Member: {detail.get('bot_member_status', 'unknown')}\n"
+                f"📅 Added: {added}\n"
+                f"🔄 Updated: {updated}",
+                parse_mode='Markdown'
+            )
+        except BadRequest as e:
+            if "Message is not modified" not in str(e):
+                raise
+
+    elif action == "groups_page":
+        page = int(parts[2])
+        # Re-show the groups list at the given page
+        groups = get_all_groups()
+        if not groups:
+            try:
+                await query.edit_message_text("No groups registered.")
+            except Exception:
+                pass
+            return
+
+        counts = get_group_count_by_status()
+        total = len(groups)
+        per_page = 10
+        total_pages = (total + per_page - 1) // per_page
+        if page >= total_pages:
+            page = total_pages - 1
+        if page < 0:
+            page = 0
+
+        start = page * per_page
+        end = start + per_page
+        page_groups = groups[start:end]
+
+        msg = (
+            "👥 *Group Management*\n\n"
+            f"📊 Total: `{total}` | 🟢 Allowed: `{counts.get('allowed', 0)}` | "
+            f"🔴 Blocked: `{counts.get('blocked', 0)}` | ⚪ Inactive: `{counts.get('inactive', 0)}`\n"
+            f"📄 Page `{page + 1}` of `{total_pages}`\n\n"
+        )
+
+        for g in page_groups:
+            cid = g['chat_id']
+            title = g.get('chat_title') or 'Unknown'
+            username = g.get('chat_username') or '-'
+            ctype = g.get('chat_type') or 'group'
+            status = g.get('status', 'allowed')
+            added = (g.get('added_at') or 'Unknown')[:10]
+
+            status_emoji = "🟢" if status == 'allowed' else ("🔴" if status == 'blocked' else "⚪")
+            status_text = status.upper()
+
+            msg += (
+                f"{status_emoji} *{title}*\n"
+                f"   ID: `{cid}` | Type: {ctype} | Status: {status_text}\n"
+                f"   Username: @{username} | Added: {added}\n\n"
+            )
+
+        keyboard = []
+        for g in page_groups:
+            cid = g['chat_id']
+            status = g.get('status', 'allowed')
+            allow_btn_text = "✅ ALLOW" if status != 'allowed' else "✅ ALLOWED"
+            block_btn_text = "🔴 BLOCK" if status != 'blocked' else "🔴 BLOCKED"
+            keyboard.append([
+                InlineKeyboardButton(allow_btn_text, callback_data=f"group_allow_{cid}"),
+                InlineKeyboardButton(block_btn_text, callback_data=f"group_block_{cid}"),
+                InlineKeyboardButton("ℹ️ DETAILS", callback_data=f"group_details_{cid}"),
+            ])
+
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"groups_page_{page - 1}"))
+        if end < total:
+            nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"groups_page_{page + 1}"))
+        if nav_buttons:
+            keyboard.append(nav_buttons)
+
+        try:
+            await query.edit_message_text(
+                msg,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+        except BadRequest as e:
+            if "Message is not modified" not in str(e):
+                raise
 
 
 async def register_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1518,6 +2067,12 @@ def main():
         app.add_handler(CommandHandler("broadcast", broadcast_cmd))
         app.add_handler(CommandHandler("registergroup", register_group_cmd))
         app.add_handler(CommandHandler("apistatus", apistatus_cmd))
+        # Group Management commands
+        app.add_handler(CommandHandler("groups", groups_cmd))
+        app.add_handler(CommandHandler("allowgroup", allowgroup_cmd))
+        app.add_handler(CommandHandler("blockgroup", blockgroup_cmd))
+        app.add_handler(CommandHandler("syncgroups", syncgroups_cmd))
+        app.add_handler(CallbackQueryHandler(group_callback_handler, pattern="^(group_allow|group_block|group_details|groups_page)_"))
         app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
         app.add_handler(CallbackQueryHandler(forcejoin_noop_callback, pattern="^forcejoin_noop$"))
         # Stick silences: stickers produce NO reply — not even "Admin only" / "No document".
