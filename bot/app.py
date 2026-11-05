@@ -3614,7 +3614,19 @@ def main():
         # Start polling — run_polling() manages its own event loop internally,
         # including bot identity check (get_me) and webhook deletion.
         print("🚀 Starting polling...", flush=True)
-        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        
+        # Create a new event loop and run polling within it
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True))
+        except Exception as e:
+            print(f"❌ Bot setup failed: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+        # Keep process alive so health server can still respond
+        while True:
+            time.sleep(60)
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
@@ -3625,6 +3637,10 @@ def main():
 
 
 if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
     main()
 
 if __name__ == "__main__":
