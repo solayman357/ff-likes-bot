@@ -1395,6 +1395,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply(update, "🔴 Bot is OFF")
         return
     register_chat(update)
+    user_id = update.effective_user.id
     msg = (
         "📖 *𝑪𝑶𝑴𝑴𝑨𝑵𝑫 𝑳𝑰𝑺𝑻*\n\n"
         "🔹 `/like REGION UID` – Send likes\n"
@@ -1404,6 +1405,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Supports any region* – just type the code.\n\n"
         "👑 *Admin commands:*\n"
         "`/allow` – Allow current group\n"
+        "`/registergroup <chat_id>` – Register a group\n"
+        "`/allowgroup <chat_id>` – Allow a group\n"
+        "`/blockgroup <chat_id>` – Block a group\n"
+        "`/syncgroups` – Sync groups from broadcast list\n"
+        "`/groups` – List and manage all groups (pagination)\n"
         "`/off` / `/on` – Turn bot off/on\n"
         "`/stats` – Today's usage\n"
         "`/setprivate` / `/setpublic` – Change group mode\n"
@@ -1418,11 +1424,16 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/forcejoinlist` – List required channels\n"
         "`/forcejoinstatus` – Show force-join configuration\n"
         "`/forcejoinon` / `/forcejoinoff` – Enable/disable force join\n"
-        "`/broadcast <message>` – Send message to all users and groups"
-        "`/groups` – List and manage all groups (pagination)\n"
-        "`/allowgroup <chat_id>` – Allow a group\n"
-        "`/blockgroup <chat_id>` – Block a group\n"
-        "`/syncgroups` – Sync groups from broadcast list"
+        "`/broadcast <message>` – Send message to all users and groups\n"
+        "`/apistatus` – Show API token bank & configured tokens\n\n"
+        "🔥 *Auto Like commands:*\n"
+        "`/autolike REGION UID TOTAL` – Create auto-like task\n"
+        "`/myautolike` – View your auto-like tasks\n"
+        "`/autolikeinfo UID` – Task details & progress\n"
+        "`/stopautolike UID` – Stop an auto-like task\n"
+        "`/resumeautolike UID` – Resume an auto-like task\n"
+        "`/autolikestatus` – All auto-like tasks (Admin only)\n"
+        "`/autolikelist` – List all auto-like tasks (Admin only)"
     )
     await reply(update, msg)
 
