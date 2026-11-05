@@ -2,10 +2,16 @@
   "status": "on",
   "mode": "public",
   "limit": 2,
-  "like_tokens": 240,
-  "force_join": false,
-  "force_join_channels": [],
-  "force_join_links": {},
-  "forward_channel_id": "@autolikespro",
-  "forward_channel_link": "https://t.me/autolikespro"
+  "like_tokens": 300,
+  "force_join": true,
+  "force_join_channels": [
+    "@FFLIKESPRO2",
+    "@autolikespro"
+  ],
+  "force_join_links": {
+    "@FFLIKESPRO2": "https://t.me/FFLIKESPRO2",
+    "@autolikespro": "https://t.me/autolikespro"
+  },
+  "forward_channel_id": "@FFAUTOLIKESPRO1",
+  "forward_channel_link": "https://t.me/FFAUTOLIKESPRO1"
 }
