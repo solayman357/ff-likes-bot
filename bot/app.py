@@ -2771,24 +2771,14 @@ def _migrate_force_join_channels():
 
     for ch in force_join_channels:
         link = force_join_links.get(str(ch), "") or ""
-        # Check if the current channel identifier is likely a placeholder
-        # (not a valid username, not a numeric chat ID, not starting with @ or +)
-        is_placeholder = (
-            not ch.startswith("@")
-            and not ch.startswith("+")
-            and not ch.startswith("-")
-            and not ch.lstrip("-").isdigit()
-        )
-
-        if is_placeholder and link:
-            # Try to extract username from the link
-            extracted = _extract_username_from_link(link)
-            if extracted and extracted != ch:
-                print(f"🔄 Migrating force-join channel '{ch}' -> '{extracted}' from link", flush=True)
-                new_channels.append(extracted)
-                new_links[extracted] = link
-                migrated = True
-                continue
+        # Try to extract username from the link if channel is not already a valid username/ID
+        extracted = _extract_username_from_link(link) if link else None
+        if extracted and extracted != ch:
+            print(f"🔄 Migrating force-join channel '{ch}' -> '{extracted}' from link", flush=True)
+            new_channels.append(extracted)
+            new_links[extracted] = link
+            migrated = True
+            continue
 
         new_channels.append(ch)
         if link:
@@ -3138,6 +3128,9 @@ async def set_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def autolike_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Create a new auto like task: /autolike REGION UID TOTAL_LIKES"""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only!")
+        return
     if not context.args or len(context.args) < 3:
         await reply(
             update,
