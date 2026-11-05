@@ -1171,7 +1171,10 @@ async def groups_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append(nav_buttons)
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await reply(update, msg, reply_markup=reply_markup)
+    try:
+        await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
+    except Exception as e:
+        print(f"⚠️ groups_cmd reply failed: {e}", flush=True)
 
 
 async def allowgroup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
