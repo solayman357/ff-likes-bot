@@ -279,7 +279,7 @@ def _read_json(path, default):
 
 def load_data():
     """Load persisted data. GitHub is the source of truth when enabled."""
-    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channels, force_join_links, forward_channel_id, forward_channel_link
+    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channels, force_join_links, forward_channel_ids, forward_channel_links, forward_channel_id, forward_channel_link
 
     if github_persistence:
         try:
