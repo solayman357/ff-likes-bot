@@ -540,6 +540,9 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if status == 1:
         update_user_like(user_id)
+        # Persist successful like history
+        log_successful_like(uid, region, given, before, after, user_id)
+        save_all()
         user_used = user_limits.get(str(user_id), {}).get('count', 0) if not is_admin(user_id) else "Unlimited"
         result = (
             f"✅ LIKE SENT ✅\n\n"
