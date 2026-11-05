@@ -2426,7 +2426,7 @@ def start_health_server():
 
 
 # ============ MAIN ============
-async def main():
+def main():
     global github_persistence
     # Initialize GitHub persistence
     github_persistence = init_github_persistence()
@@ -2507,23 +2507,22 @@ async def main():
         print("   → Normal users: only in groups, daily limit applies", flush=True)
         print("   → Admin users: anywhere (DM + groups), unlimited likes", flush=True)
 
-        # Test bot identity before polling
+        # Test bot identity before polling (run async calls in a temp event loop)
         try:
-            bot_info = await app.bot.get_me()
+            import asyncio as _asyncio
+            _loop = _asyncio.new_event_loop()
+            _asyncio.set_event_loop(_loop)
+            bot_info = _loop.run_until_complete(app.bot.get_me())
             print(f"✅ Bot identity confirmed: @{bot_info.username} (id={bot_info.id})", flush=True)
-        except Exception as e:
-            print(f"❌ Failed to get bot info: {e}", flush=True)
-
-        # Delete any existing webhook to avoid conflicts
-        try:
-            await app.bot.delete_webhook(drop_pending_updates=True)
+            _loop.run_until_complete(app.bot.delete_webhook(drop_pending_updates=True))
             print("🗑️ Deleted existing webhook, dropped pending updates", flush=True)
+            _loop.close()
         except Exception as e:
-            print(f"⚠️ Failed to delete webhook: {e}", flush=True)
+            print(f"⚠️ Bot setup calls failed: {e}", flush=True)
 
-        # Start polling — run_polling() manages its own event loop and handles retries internally
+        # Start polling — run_polling() manages its own event loop internally
         print("🚀 Starting polling...", flush=True)
-        await app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
@@ -2534,4 +2533,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
