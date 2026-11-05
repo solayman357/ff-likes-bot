@@ -3580,6 +3580,7 @@ async def run_bot():
         print("   → Admin users: anywhere (DM + groups), unlimited likes", flush=True)
 
         # Start the application
+        await app.initialize()
         await app.start()
 
         # Start polling
