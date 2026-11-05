@@ -341,6 +341,11 @@ def load_data():
         print(f"⚠️ Group DB init/sync failed: {e}", flush=True)
 
 
+def _save_successful_likes():
+    """No-op placeholder — successful likes are saved immediately by log_successful_like()."""
+    pass
+
+
 def save_all():
     try:
         with open(DATA_FILES['allowed'], 'w') as f: json.dump(allowed_groups, f, indent=2)
