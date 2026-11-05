@@ -3495,42 +3495,20 @@ def start_health_server():
 
 
 # ============ MAIN ============
-def main():
-    global github_persistence
-    # Initialize GitHub persistence
-    github_persistence = init_github_persistence()
-    
-    # Start health server first so Render can reach us even if polling is down
-    try:
-        start_health_server()
-    except Exception as e:
-        print(f"❌ Health server failed: {e}", flush=True)
-
-    try:
-        load_data()
-    except Exception as e:
-        print(f"❌ load_data failed: {e}", flush=True)
-
-    # Initialize Auto Like scheduler database
-    try:
-        init_auto_like_db()
-        print("✅ Auto Like scheduler DB initialized", flush=True)
-    except Exception as e:
-        print(f"⚠️ Auto Like DB init failed: {e}", flush=True)
-
+async def run_bot():
+    """Run the bot with proper event loop management."""
     # Build the Telegram application
-    try:
-        request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
-        app = Application.builder().token(BOT_TOKEN).request(request).build()
+    request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
+    app = Application.builder().token(BOT_TOKEN).request(request).build()
 
-        job_queue = app.job_queue
-        if job_queue:
-            job_queue.run_daily(reset_midnight, time=datetime_time(hour=0, minute=0, second=0), days=tuple(range(7)))
-            print("⏰ Midnight reset scheduled", flush=True)
+    job_queue = app.job_queue
+    if job_queue:
+        job_queue.run_daily(reset_midnight, time=datetime_time(hour=0, minute=0, second=0), days=tuple(range(7)))
+        print("⏰ Midnight reset scheduled", flush=True)
 
-            # Schedule auto like check every minute
-            job_queue.run_repeating(auto_like_scheduler_tick, interval=60, first=10)
-            print("⏰ Auto Like scheduler tick scheduled (every 60s)", flush=True)
+        # Schedule auto like check every minute
+        job_queue.run_repeating(auto_like_scheduler_tick, interval=60, first=10)
+        print("⏰ Auto Like scheduler tick scheduled (every 60s)", flush=True)
 
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_cmd))
@@ -3590,10 +3568,50 @@ def main():
         print("   → Normal users: only in groups, daily limit applies", flush=True)
         print("   → Admin users: anywhere (DM + groups), unlimited likes", flush=True)
 
-        # Start polling — run_polling() manages its own event loop internally,
-        # including bot identity check (get_me) and webhook deletion.
+        # Start the application
+        await app.start()
+
+        # Start polling
         print("🚀 Starting polling...", flush=True)
-        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
+        # Keep running until stopped
+        await app.updater.idle()
+
+def main():
+    global github_persistence
+    # Initialize GitHub persistence
+    github_persistence = init_github_persistence()
+    
+    # Start health server first so Render can reach us even if polling is down
+    try:
+        start_health_server()
+    except Exception as e:
+        print(f"❌ Health server failed: {e}", flush=True)
+
+    try:
+        load_data()
+    except Exception as e:
+        print(f"❌ load_data failed: {e}", flush=True)
+
+    # Initialize Auto Like scheduler database
+    try:
+        init_auto_like_db()
+        print("✅ Auto Like scheduler DB initialized", flush=True)
+    except Exception as e:
+        print(f"⚠️ Auto Like DB init failed: {e}", flush=True)
+
+    # Initialize backup directory and verify database integrity on startup
+    try:
+        init_backup_dir()
+        ok, msg = verify_database_integrity()
+        print(f"💾 Backup dir initialized. DB Integrity: {'✅ OK' if ok else '❌ FAILED'} - {msg}", flush=True)
+    except Exception as e:
+        print(f"⚠️ Backup/init check failed: {e}", flush=True)
+
+    # Run the bot
+    try:
+        asyncio.run(run_bot())
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
