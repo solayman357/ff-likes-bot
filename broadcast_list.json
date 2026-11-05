@@ -1,4 +1,11 @@
 {
   "chats": {},
-  "users": {}
+  "users": {
+    "8835959041": {
+      "user_id": 8835959041,
+      "username": "st3292",
+      "first_name": "S",
+      "added_at": "2026-11-05"
+    }
+  }
 }
