@@ -3324,10 +3324,6 @@ async def resumeautolike_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if next_exec <= now_bd:
         next_exec = next_exec + __import__('datetime').timedelta(days=1)
 
-    upsert_auto_like_task(
-        chat_id=None,
-        chat_id=uid,  # This is wrong but we need to update by uid
-    )
     # Actually update directly
     with GROUP_DB_LOCK:
         conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
