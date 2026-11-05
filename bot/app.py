@@ -2426,7 +2426,7 @@ def start_health_server():
 
 
 # ============ MAIN ============
-def main():
+async def main():
     global github_persistence
     # Initialize GitHub persistence
     github_persistence = init_github_persistence()
@@ -2509,30 +2509,21 @@ def main():
 
         # Test bot identity before polling
         try:
-            bot_info = app.bot.get_me()
+            bot_info = await app.bot.get_me()
             print(f"✅ Bot identity confirmed: @{bot_info.username} (id={bot_info.id})", flush=True)
         except Exception as e:
             print(f"❌ Failed to get bot info: {e}", flush=True)
 
         # Delete any existing webhook to avoid conflicts
         try:
-            app.bot.delete_webhook(drop_pending_updates=True)
+            await app.bot.delete_webhook(drop_pending_updates=True)
             print("🗑️ Deleted existing webhook, dropped pending updates", flush=True)
         except Exception as e:
             print(f"⚠️ Failed to delete webhook: {e}", flush=True)
 
-        # Polling loop with auto-restart on failure
+        # Start polling — run_polling() manages its own event loop and handles retries internally
         print("🚀 Starting polling...", flush=True)
-        while True:
-            try:
-                print("📡 Starting polling...", flush=True)
-                app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-            except Exception as e:
-                import traceback
-                print(f"❌ Polling error: {e}", flush=True)
-                traceback.print_exc()
-                print("🔄 Restarting polling in 5 seconds...", flush=True)
-                time.sleep(5)
+        await app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
@@ -2541,5 +2532,6 @@ def main():
         while True:
             time.sleep(60)
 
+
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
