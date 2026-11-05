@@ -3611,14 +3611,19 @@ def main():
         print("   → Normal users: only in groups, daily limit applies", flush=True)
         print("   → Admin users: anywhere (DM + groups), unlimited likes", flush=True)
 
-        # Start polling — run_polling() manages its own event loop internally,
-        # including bot identity check (get_me) and webhook deletion.
+        # Start polling — create a dedicated event loop for the bot
         print("🚀 Starting polling...", flush=True)
-        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-    except Exception as e:
-        print(f"❌ Bot setup failed: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
+        
+        # Create a new event loop for the bot polling
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            loop.run_until_complete(app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True))
+        except Exception as e:
+            print(f"❌ Bot setup failed: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
         # Keep process alive so health server can still respond
         while True:
             time.sleep(60)
