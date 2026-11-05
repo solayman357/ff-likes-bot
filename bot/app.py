@@ -311,6 +311,12 @@ def load_data():
         forward_channel_id = cfg.get('forward_channel_id', forward_channel_id)
         forward_channel_link = cfg.get('forward_channel_link', forward_channel_link)
 
+    # Migrate stored force-join channel identifiers (e.g. "channel-1" -> "@FFLIKESPRO2")
+    try:
+        _migrate_force_join_channels()
+    except Exception as e:
+        print(f"⚠️ Force-join migration failed: {e}", flush=True)
+
     # First run with persistence enabled: upload existing settings instead of
     # replacing them with defaults.
     if github_persistence:
@@ -426,7 +432,13 @@ async def safe_edit_message(target, text: str, reply_markup=None, parse_mode: st
 
 
 async def is_user_member_single(context: ContextTypes.DEFAULT_TYPE, user_id: int, channel: str) -> bool:
-    """Check membership in one channel. Returns True only if truly joined."""
+    """Check membership in one channel. Returns True only if truly joined.
+
+    Tries the stored channel identifier first. If that fails (e.g. placeholder
+    name like "channel-1"), falls back to extracting the username from the
+    stored invite link.
+    """
+    # Try the stored channel identifier first
     try:
         member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
         joined = _member_is_joined(member)
@@ -434,13 +446,26 @@ async def is_user_member_single(context: ContextTypes.DEFAULT_TYPE, user_id: int
             print(f"🔍 getChatMember '{channel}' user={user_id}: status={getattr(member, 'status', '?')} → NOT joined", flush=True)
         return joined
     except BadRequest as e:
-        msg = str(e)
-        if "chat not found" in msg.lower():
-            print(f"❌ getChatMember '{channel}': chat not found — bot may not be in this channel or ID is wrong: {e}", flush=True)
-        elif "forbidden" in msg.lower() or "not an administrator" in msg.lower():
-            print(f"❌ getChatMember '{channel}': bot is not admin in this channel — cannot verify membership: {e}", flush=True)
-        else:
-            print(f"⚠️ getChatMember '{channel}' failed (BadRequest): {e}", flush=True)
+        msg = str(e).lower()
+        # If chat not found, try extracting from the link
+        if "chat not found" in msg:
+            link = force_join_links.get(str(channel), "") or ""
+            extracted = _extract_username_from_link(link)
+            if extracted and extracted != channel:
+                print(f"🔄 Falling back to link-extracted identifier '{extracted}' for '{channel}'", flush=True)
+                try:
+                    member = await context.bot.get_chat_member(chat_id=extracted, user_id=user_id)
+                    joined = _member_is_joined(member)
+                    if not joined:
+                        print(f"🔍 getChatMember '{extracted}' user={user_id}: status={getattr(member, 'status', '?')} → NOT joined", flush=True)
+                    return joined
+                except BadRequest as e2:
+                    print(f"❌ getChatMember '{extracted}' failed: {e2}", flush=True)
+                    return False
+                except Exception as e2:
+                    print(f"⚠️ getChatMember '{extracted}' failed: {type(e2).__name__}: {e2}", flush=True)
+                    return False
+        print(f"❌ getChatMember '{channel}': chat not found — bot may not be in this channel or ID is wrong: {e}", flush=True)
         return False
     except Exception as e:
         print(f"⚠️ getChatMember '{channel}' failed: {type(e).__name__}: {e}", flush=True)
@@ -1928,8 +1953,102 @@ async def set_api_100(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============ FORCE JOIN COMMANDS ============
+import re
+
+
+def _extract_username_from_link(link: str) -> str:
+    """Extract channel username from a Telegram link.
+
+    Supports:
+      https://t.me/USERNAME      -> @USERNAME
+      https://t.me/+INVITEHASH   -> +INVITEHASH (private invite, kept as-is)
+      https://t.me/joinchat/...  -> kept as-is
+      @USERNAME                  -> @USERNAME
+      USERNAME                   -> @USERNAME
+    """
+    if not link:
+        return ""
+    link = link.strip()
+
+    # Already a username
+    if link.startswith("@"):
+        return link
+    if link.isalnum() or "_" in link:
+        return "@" + link
+
+    # Parse t.me links
+    m = re.match(r"^https?://t\.me/(.+)$", link, re.IGNORECASE)
+    if m:
+        path = m.group(1)
+        if path.startswith("+"):
+            # Private invite link — keep as-is for the Join button,
+            # but cannot be used with get_chat_member directly.
+            return path
+        if path.startswith("joinchat/"):
+            return path
+        return "@" + path
+
+    return link
+
+
+def _migrate_force_join_channels():
+    """Migrate existing force_join_channels to valid Telegram identifiers.
+
+    Old data may contain placeholder names like "channel-1", "channel-2"
+    instead of actual usernames. This function extracts the real username
+    from force_join_links (e.g. https://t.me/FFLIKESPRO2 -> @FFLIKESPRO2)
+    and updates force_join_channels accordingly.
+    """
+    global force_join_channels, force_join_links
+    migrated = False
+    new_channels = []
+    new_links = {}
+
+    for ch in force_join_channels:
+        link = force_join_links.get(str(ch), "") or ""
+        # Check if the current channel identifier is likely a placeholder
+        # (not a valid username, not a numeric chat ID, not starting with @ or +)
+        is_placeholder = (
+            not ch.startswith("@")
+            and not ch.startswith("+")
+            and not ch.startswith("-")
+            and not ch.lstrip("-").isdigit()
+        )
+
+        if is_placeholder and link:
+            # Try to extract username from the link
+            extracted = _extract_username_from_link(link)
+            if extracted and extracted != ch:
+                print(f"🔄 Migrating force-join channel '{ch}' -> '{extracted}' from link", flush=True)
+                new_channels.append(extracted)
+                new_links[extracted] = link
+                migrated = True
+                continue
+
+        new_channels.append(ch)
+        if link:
+            new_links[str(ch)] = link
+
+    if migrated:
+        force_join_channels = new_channels
+        force_join_links = new_links
+        save_all()
+        print(f"✅ Force-join channel migration complete: {len(force_join_channels)} channel(s)", flush=True)
+
+
 def _normalize_channel(value: str) -> str:
-    return (value or "").strip()
+    """Normalize a channel value: strip whitespace, extract username from links."""
+    value = (value or "").strip()
+    if not value:
+        return value
+    # If it's a t.me link, extract the username
+    if value.lower().startswith(("http://", "https://", "tg://")):
+        extracted = _extract_username_from_link(value)
+        return extracted
+    # If it's a bare username without @, add it
+    if not value.startswith("@") and not value.startswith("+") and not value.startswith("-"):
+        return "@" + value
+    return value
 
 
 def _find_channel_index(channel: str) -> int:
