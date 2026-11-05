@@ -3601,7 +3601,7 @@ async def main():
         # filters.Document.ALL matches only documents (never stickers).
         app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         # Auto-register groups when bot is added; unregister when bot is removed/kicked.
-        app.add_handler(ChatMemberHandler(my_chat_member_handler, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))
+        app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
         app.add_error_handler(error_handler)
 
         # Set bot reference for announcements
@@ -3626,7 +3626,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 if __name__ == "__main__":
     main()
 
