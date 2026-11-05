@@ -3495,7 +3495,7 @@ def start_health_server():
 
 
 # ============ MAIN ============
-def main():
+async def main():
     global github_persistence
     # Initialize GitHub persistence
     github_persistence = init_github_persistence()
@@ -3510,14 +3510,6 @@ def main():
         load_data()
     except Exception as e:
         print(f"❌ load_data failed: {e}", flush=True)
-
-    # Initialize backup directory and verify database integrity on startup
-    try:
-        init_backup_dir()
-        ok, msg = verify_database_integrity()
-        print(f"💾 Backup dir initialized. DB Integrity: {'✅ OK' if ok else '❌ FAILED'} - {msg}", flush=True)
-    except Exception as e:
-        print(f"⚠️ Backup/init check failed: {e}", flush=True)
 
     # Initialize Auto Like scheduler database
     try:
@@ -3601,7 +3593,7 @@ def main():
         # Start polling — run_polling() manages its own event loop internally,
         # including bot identity check (get_me) and webhook deletion.
         print("🚀 Starting polling...", flush=True)
-        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        await app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
@@ -3610,6 +3602,9 @@ def main():
         while True:
             time.sleep(60)
 
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
 if __name__ == "__main__":
     main()
