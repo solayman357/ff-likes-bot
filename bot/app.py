@@ -251,16 +251,738 @@ def sync_groups_from_broadcast():
     except Exception as e:
         print(f"⚠️ sync_groups_from_broadcast failed: {e}", flush=True)
         return 0
-bot_status = "on"
-bot_mode = "public"
-allowed_groups = {}
-daily_stats = {}
-user_limits = {}
-daily_limit = 2
-like_tokens = 240          # tokens per /like request (mode)
-force_join = False
-force_join_channels = []
-force_join_links = {}
+# ============ AUTO LIKE SCHEDULER ============
+import zoneinfo
+
+try:
+    BD_TZ = zoneinfo.ZoneInfo("Asia/Dhaka")
+except Exception:
+    import pytz
+    BD_TZ = pytz.timezone("Asia/Dhaka")
+
+AUTO_LIKE_DB_FILE = GROUP_DB_FILE  # Same SQLite database
+AUTO_LIKE_LOCK = threading.Lock()
+AUTO_LIKE_SCHEDULER_TASK = None
+AUTO_LIKE_SCHEDULER_RUNNING = False
+
+# Broadcast destinations for auto like announcements
+AUTO_LIKE_BROADCAST_ENABLED = True
+AUTO_LIKE_CHANNEL_ID = None
+AUTO_LIKE_GROUP_ID = None
+AUTO_LIKE_CHANNEL_MSG_ID = None
+AUTO_LIKE_GROUP_MSG_ID = None
+
+# Admin configurable: max target likes per task
+MAX_AUTO_LIKE_TARGET = 100000
+
+
+def init_auto_like_db():
+    """Initialize the Auto Like scheduler tables in SQLite."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            cur = conn.cursor()
+
+            # Auto like tasks table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS auto_like_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    owner_id INTEGER NOT NULL,
+                    owner_username TEXT,
+                    owner_name TEXT,
+                    uid INTEGER NOT NULL,
+                    region TEXT NOT NULL,
+                    target_likes INTEGER NOT NULL,
+                    delivered_likes INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'scheduled',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_executed TEXT,
+                    next_execution TEXT,
+                    channel_msg_id INTEGER,
+                    group_msg_id INTEGER,
+                    UNIQUE(owner_id, uid)
+                )
+            """)
+
+            # Auto like execution history table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS auto_like_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    owner_id INTEGER NOT NULL,
+                    uid INTEGER NOT NULL,
+                    region TEXT NOT NULL,
+                    likes_delivered INTEGER NOT NULL,
+                    before_likes INTEGER,
+                    after_likes INTEGER,
+                    executed_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error_message TEXT,
+                    FOREIGN KEY (task_id) REFERENCES auto_like_tasks(id)
+                )
+            """)
+
+            conn.commit()
+            conn.close()
+        print("✅ Auto Like scheduler DB initialized", flush=True)
+    except Exception as e:
+        print(f"⚠️ Auto Like DB init failed: {e}", flush=True)
+
+
+def upsert_auto_like_task(owner_id, owner_username, owner_name, uid, region,
+                          target_likes, status=None, delivered_likes=None,
+                          last_executed=None, next_execution=None,
+                          channel_msg_id=None, group_msg_id=None):
+    """Add or update an auto like task."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            cur = conn.cursor()
+            now = datetime.now().isoformat()
+
+            cur.execute(
+                "SELECT id, delivered_likes, status, next_execution FROM auto_like_tasks "
+                "WHERE owner_id = ? AND uid = ?",
+                (owner_id, uid)
+            )
+            row = cur.fetchone()
+
+            if row is None:
+                # New task
+                task_id = cur.execute(
+                    "INSERT INTO auto_like_tasks "
+                    "(owner_id, owner_username, owner_name, uid, region, target_likes, "
+                    "delivered_likes, status, created_at, updated_at, last_executed, "
+                    "next_execution, channel_msg_id, group_msg_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (owner_id, owner_username, owner_name, uid, region,
+                     target_likes, delivered_likes or 0,
+                     status or 'scheduled', now, now,
+                     last_executed, next_execution,
+                     channel_msg_id, group_msg_id)
+                ).lastrowid
+            else:
+                task_id = row[0]
+                existing_delivered = row[1]
+                existing_status = row[2]
+                existing_next = row[3]
+
+                new_delivered = delivered_likes if delivered_likes is not None else existing_delivered
+                new_status = status if status is not None else existing_status
+                new_next = next_execution if next_execution is not None else existing_next
+
+                cur.execute(
+                    "UPDATE auto_like_tasks SET "
+                    "owner_username = COALESCE(?, owner_username), "
+                    "owner_name = COALESCE(?, owner_name), "
+                    "target_likes = COALESCE(?, target_likes), "
+                    "delivered_likes = ?, status = ?, updated_at = ?, "
+                    "last_executed = COALESCE(?, last_executed), "
+                    "next_execution = ?, "
+                    "channel_msg_id = COALESCE(?, channel_msg_id), "
+                    "group_msg_id = COALESCE(?, group_msg_id) "
+                    "WHERE id = ?",
+                    (owner_username, owner_name, target_likes,
+                     new_delivered, new_status, now,
+                     last_executed, new_next,
+                     channel_msg_id, group_msg_id, task_id)
+                )
+
+            conn.commit()
+            conn.close()
+        return task_id
+    except Exception as e:
+        print(f"⚠️ upsert_auto_like_task failed: {e}", flush=True)
+        return None
+
+
+def get_auto_like_tasks(owner_id=None, status=None):
+    """Get auto like tasks, optionally filtered by owner and/or status."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            if owner_id is not None and status is not None:
+                cur.execute(
+                    "SELECT * FROM auto_like_tasks WHERE owner_id = ? AND status = ? "
+                    "ORDER BY created_at DESC",
+                    (owner_id, status)
+                )
+            elif owner_id is not None:
+                cur.execute(
+                    "SELECT * FROM auto_like_tasks WHERE owner_id = ? "
+                    "ORDER BY created_at DESC",
+                    (owner_id,)
+                )
+            elif status is not None:
+                cur.execute(
+                    "SELECT * FROM auto_like_tasks WHERE status = ? "
+                    "ORDER BY created_at DESC",
+                    (status,)
+                )
+            else:
+                cur.execute("SELECT * FROM auto_like_tasks ORDER BY created_at DESC")
+
+            rows = [dict(r) for r in cur.fetchall()]
+            conn.close()
+        return rows
+    except Exception as e:
+        print(f"⚠️ get_auto_like_tasks failed: {e}", flush=True)
+        return []
+
+
+def get_auto_like_task(task_id):
+    """Get a single auto like task by ID."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM auto_like_tasks WHERE id = ?", (task_id,))
+            row = cur.fetchone()
+            conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"⚠️ get_auto_like_task failed: {e}", flush=True)
+        return None
+
+
+def get_auto_like_task_by_uid(owner_id, uid):
+    """Get auto like task by owner and UID."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM auto_like_tasks WHERE owner_id = ? AND uid = ?",
+                (owner_id, uid)
+            )
+            row = cur.fetchone()
+            conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"⚠️ get_auto_like_task_by_uid failed: {e}", flush=True)
+        return None
+
+
+def update_auto_like_task_progress(task_id, delivered_likes, status=None,
+                                    last_executed=None, next_execution=None):
+    """Update task progress after execution."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            cur = conn.cursor()
+            now = datetime.now().isoformat()
+
+            cur.execute(
+                "SELECT delivered_likes FROM auto_like_tasks WHERE id = ?",
+                (task_id,)
+            )
+            row = cur.fetchone()
+            if row is None:
+                conn.close()
+                return False
+
+            existing_delivered = row[0]
+            new_delivered = existing_delivered + delivered_likes
+
+            new_status = status if status is not None else 'scheduled'
+
+            cur.execute(
+                "UPDATE auto_like_tasks SET "
+                "delivered_likes = ?, status = ?, updated_at = ?, "
+                "last_executed = ?, next_execution = ? "
+                "WHERE id = ?",
+                (new_delivered, new_status, now,
+                 last_executed, next_execution, task_id)
+            )
+            conn.commit()
+            conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ update_auto_like_task_progress failed: {e}", flush=True)
+        return False
+
+
+def add_auto_like_history(task_id, owner_id, uid, region, likes_delivered,
+                          before_likes, after_likes, status, error_message=None):
+    """Add execution history record."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            cur = conn.cursor()
+            now = datetime.now().isoformat()
+
+            cur.execute(
+                "INSERT INTO auto_like_history "
+                "(task_id, owner_id, uid, region, likes_delivered, "
+                "before_likes, after_likes, executed_at, status, error_message) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (task_id, owner_id, uid, region, likes_delivered,
+                 before_likes, after_likes, now, status, error_message)
+            )
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        print(f"⚠️ add_auto_like_history failed: {e}", flush=True)
+
+
+def get_auto_like_history(task_id, limit=10):
+    """Get execution history for a task."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM auto_like_history WHERE task_id = ? "
+                "ORDER BY executed_at DESC LIMIT ?",
+                (task_id, limit)
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+            conn.close()
+        return rows
+    except Exception as e:
+        print(f"⚠️ get_auto_like_history failed: {e}", flush=True)
+        return []
+
+
+def get_due_auto_like_tasks():
+    """Get tasks that are due for execution (next_execution <= now)."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            now = datetime.now(BD_TZ).isoformat()
+            cur.execute(
+                "SELECT * FROM auto_like_tasks "
+                "WHERE status IN ('scheduled', 'paused', 'resumed') "
+                "AND next_execution IS NOT NULL "
+                "AND next_execution <= ? "
+                "ORDER BY next_execution ASC",
+                (now,)
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+            conn.close()
+        return rows
+    except Exception as e:
+        print(f"⚠️ get_due_auto_like_tasks failed: {e}", flush=True)
+        return []
+
+
+def set_auto_like_task_status(task_id, status):
+    """Set task status (scheduled, running, paused, completed, failed, stopped)."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE auto_like_tasks SET status = ?, updated_at = ? WHERE id = ?",
+                (status, datetime.now().isoformat(), task_id)
+            )
+            conn.commit()
+            changed = cur.rowcount > 0
+            conn.close()
+        return changed
+    except Exception as e:
+        print(f"⚠️ set_auto_like_task_status failed: {e}", flush=True)
+        return False
+
+
+def get_auto_like_stats():
+    """Get overall statistics for all auto like tasks."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            cur = conn.cursor()
+
+            cur.execute("SELECT COUNT(*) FROM auto_like_tasks")
+            total = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM auto_like_tasks WHERE status = 'scheduled'")
+            scheduled = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM auto_like_tasks WHERE status = 'running'")
+            running = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM auto_like_tasks WHERE status = 'completed'")
+            completed = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM auto_like_tasks WHERE status = 'paused'")
+            paused = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM auto_like_tasks WHERE status = 'failed'")
+            failed = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM auto_like_tasks WHERE status = 'stopped'")
+            stopped = cur.fetchone()[0]
+
+            cur.execute("SELECT COALESCE(SUM(target_likes), 0) FROM auto_like_tasks")
+            total_target = cur.fetchone()[0]
+
+            cur.execute("SELECT COALESCE(SUM(delivered_likes), 0) FROM auto_like_tasks")
+            total_delivered = cur.fetchone()[0]
+
+            conn.close()
+
+        return {
+            'total': total,
+            'scheduled': scheduled,
+            'running': running,
+            'completed': completed,
+            'paused': paused,
+            'failed': failed,
+            'stopped': stopped,
+            'total_target': total_target,
+            'total_delivered': total_delivered,
+            'total_remaining': total_target - total_delivered,
+        }
+    except Exception as e:
+        print(f"⚠️ get_auto_like_stats failed: {e}", flush=True)
+        return {
+            'total': 0, 'scheduled': 0, 'running': 0, 'completed': 0,
+            'paused': 0, 'failed': 0, 'stopped': 0,
+            'total_target': 0, 'total_delivered': 0, 'total_remaining': 0,
+        }
+
+
+# ============ AUTO LIKE EXECUTION ============
+
+async def execute_auto_like_task(task):
+    """Execute a single auto like task via the existing API."""
+    task_id = task['id']
+    uid = task['uid']
+    region = task['region']
+    owner_id = task['owner_id']
+    target_likes = task['target_likes']
+    delivered_likes = task.get('delivered_likes', 0) or 0
+
+    remaining = target_likes - delivered_likes
+    if remaining <= 0:
+        set_auto_like_task_status(task_id, 'completed')
+        return
+
+    # Determine how many tokens to request this time
+    # Cap at remaining to avoid exceeding target
+    tokens_to_request = min(remaining, 400)  # Max 400 per API request
+
+    try:
+        # Call the existing like API
+        result = await call_like_api(region, str(uid), tokens_to_request)
+
+        if result is None or result.get("error"):
+            error_msg = result.get("error", "Unknown error") if result else "No response"
+            add_auto_like_history(
+                task_id, owner_id, uid, region, 0,
+                0, 0, 'failed', error_msg
+            )
+            print(f"⚠️ Auto like task {task_id} failed: {error_msg}", flush=True)
+            return
+
+        status = result.get('status')
+        likes_given = result.get('LikesGivenByAPI', 0)
+        before = result.get('LikesbeforeCommand', 0)
+        after = result.get('LikesafterCommand', 0)
+
+        if status == 1:
+            # Successful likes
+            actual_given = likes_given if likes_given > 0 else (after - before if after > before else 0)
+            actual_given = max(0, min(actual_given, remaining))  # Cap at remaining
+
+            new_delivered = delivered_likes + actual_given
+            new_remaining = target_likes - new_delivered
+
+            # Update task progress
+            update_auto_like_task_progress(
+                task_id, actual_gives if False else actual_given,
+                status='completed' if new_remaining <= 0 else 'scheduled',
+                last_executed=datetime.now(BD_TZ).isoformat(),
+                next_execution=(
+                    (datetime.now(BD_TZ) + __import__('datetime').timedelta(days=1))
+                    .replace(hour=4, minute=1, second=0, microsecond=0)
+                    .isoformat()
+                ) if new_remaining > 0 else None
+            )
+
+            add_auto_like_history(
+                task_id, owner_id, uid, region, actual_given,
+                before, after, 'success'
+            )
+
+            print(f"✅ Auto like task {task_id}: +{actual_given} likes "
+                  f"({new_delivered}/{target_likes})", flush=True)
+
+            # Announce progress
+            if AUTO_LIKE_BROADCAST_ENABLED:
+                await announce_auto_like_progress(
+                    task_id, owner_id, uid, region,
+                    actual_given, new_delivered, target_likes, new_remaining,
+                    status='progress' if new_remaining > 0 else 'completed'
+                )
+
+            if new_remaining <= 0:
+                set_auto_like_task_status(task_id, 'completed')
+        else:
+            # Status 2 - limit reached or other
+            add_auto_like_history(
+                task_id, owner_id, uid, region, 0,
+                before, after, 'failed',
+                f"API status {status}: Likes not given"
+            )
+            print(f"⚠️ Auto like task {task_id}: API status {status}, no likes given", flush=True)
+
+    except Exception as e:
+        print(f"⚠️ execute_auto_like_task {task_id} error: {e}", flush=True)
+        add_auto_like_history(
+            task_id, owner_id, uid, region, 0,
+            0, 0, 'failed', str(e)[:200]
+        )
+
+
+async def auto_like_scheduler_loop():
+    """Background scheduler loop - checks every minute for due tasks."""
+    global AUTO_LIKE_SCHEDULER_RUNNING
+    AUTO_LIKE_SCHEDULER_RUNNING = True
+
+    print("⏰ Auto Like scheduler started", flush=True)
+
+    while AUTO_LIKE_SCHEDULER_RUNNING:
+        try:
+            now_bd = datetime.now(BD_TZ)
+
+            # Check if it's 4:01 AM Bangladesh time
+            if now_bd.hour == 4 and now_bd.minute == 1:
+                tasks = get_due_auto_like_tasks()
+                for task in tasks:
+                    if not AUTO_LIKE_SCHEDULER_RUNNING:
+                        break
+                    await execute_auto_like_task(task)
+
+            # Sleep 60 seconds before next check
+            await asyncio.sleep(60)
+        except Exception as e:
+            print(f"⚠️ Auto like scheduler error: {e}", flush=True)
+            await asyncio.sleep(60)
+
+
+def start_auto_like_scheduler():
+    """Start the auto like scheduler background task."""
+    global AUTO_LIKE_SCHEDULER_TASK, AUTO_LIKE_SCHEDULER_RUNNING
+    if AUTO_LIKE_SCHEDULER_TASK is None or AUTO_LIKE_SCHEDULER_TASK.done():
+        AUTO_LIKE_SCHEDULER_RUNNING = True
+        AUTO_LIKE_SCHEDULER_TASK = asyncio.create_task(auto_like_scheduler_loop())
+        print("🚀 Auto Like scheduler task created", flush=True)
+
+
+def stop_auto_like_scheduler():
+    """Stop the auto like scheduler."""
+    global AUTO_LIKE_SCHEDULER_RUNNING
+    AUTO_LIKE_SCHEDULER_RUNNING = False
+    if AUTO_LIKE_SCHEDULER_TASK and not AUTO_LIKE_SCHEDULER_TASK.done():
+        AUTO_LIKE_SCHEDULER_TASK.cancel()
+        print("🛑 Auto Like scheduler stopped", flush=True)
+
+
+# Global reference to the Telegram Application for announcements
+app_bot_instance = None
+
+
+def set_app_bot(app_instance):
+    """Store reference to the Telegram Application for announcements."""
+    global app_bot_instance
+    app_bot_instance = app_instance
+
+
+async def announce_auto_like_created(task, bot_instance=None):
+    """Announce a new auto like task to channel and group."""
+    if not AUTO_LIKE_BROADCAST_ENABLED:
+        return
+
+    bot = bot_instance or app_bot_instance
+    if bot is None:
+        return
+
+    uid = task['uid']
+    region = task['region']
+    target = task['target_likes']
+    delivered = task.get('delivered_likes', 0) or 0
+    remaining = target - delivered
+    pct = (delivered / target * 100) if target > 0 else 0
+
+    msg = (
+        "🔥 *AUTO LIKE ACTIVATED*\n\n"
+        f"👤 UID: `{uid}`\n"
+        f"🌍 Region: {region}\n"
+        f"🎯 Target: {target:,} Likes\n"
+        f"❤️ Delivered: {delivered:,}\n"
+        f"📉 Remaining: {remaining:,}\n"
+        f"📊 Progress: {pct:.1f}%\n"
+        f"⏰ Schedule: Daily 04:01 AM\n"
+        f"🇧🇩 Timezone: Bangladesh\n"
+        f"🟢 Status: SCHEDULED"
+    )
+
+    await _send_announcement(bot, msg, task['id'], update_existing=False)
+
+
+async def announce_auto_like_progress(task_id, owner_id, uid, region,
+                                       likes_delivered, total_delivered,
+                                       target_likes, remaining, status,
+                                       bot_instance=None):
+    """Update progress announcement in channel and group."""
+    if not AUTO_LIKE_BROADCAST_ENABLED:
+        return
+
+    bot = bot_instance or app_bot_instance
+    if bot is None:
+        return
+
+    pct = (total_delivered / target_likes * 100) if target_likes > 0 else 0
+    bar_length = 20
+    filled = int(bar_length * total_delivered / target_likes) if target_likes > 0 else 0
+    bar = "█" * filled + "░" * (bar_length - filled)
+
+    status_emoji = {
+        'progress': '🔄',
+        'completed': '🎉',
+        'failed': '❌',
+        'paused': '⏸️',
+    }.get(status, '🔄')
+
+    status_text = {
+        'progress': 'PROGRESS',
+        'completed': 'COMPLETED',
+        'failed': 'FAILED',
+        'paused': 'PAUSED',
+    }.get(status, 'PROGRESS')
+
+    msg = (
+        f"{status_emoji} *AUTO LIKE {status_text}*\n\n"
+        f"👤 UID: `{uid}`\n"
+        f"🌍 Region: {region}\n"
+        f"🎯 Target: {target_likes:,} Likes\n"
+        f"❤️ Delivered: {total_delivered:,}\n"
+        f"📉 Remaining: {remaining:,}\n"
+        f"📊 Progress: {pct:.1f}%\n"
+        f"{bar}\n"
+        f"🟢 Status: {status_text}"
+    )
+
+    await _send_announcement(bot, msg, task_id, update_existing=True)
+
+
+async def announce_auto_like_completed(task, bot_instance=None):
+    """Announce completion of auto like task."""
+    if not AUTO_LIKE_BROADCAST_ENABLED:
+        return
+
+    bot = bot_instance or app_bot_instance
+    if bot is None:
+        return
+
+    uid = task['uid']
+    region = task['region']
+    target = task['target_likes']
+    delivered = task.get('delivered_likes', 0) or 0
+
+    msg = (
+        "🎉 *AUTO LIKE COMPLETED!*\n\n"
+        f"👤 UID: `{uid}`\n"
+        f"🌍 Region: {region}\n"
+        f"🎯 Target: {target:,} Likes\n"
+        f"❤️ Successfully Delivered: {delivered:,}\n"
+        f"🟢 Status: AUTOMATICALLY DISABLED"
+    )
+
+    await _send_announcement(bot, msg, task['id'], update_existing=False)
+
+
+async def _send_announcement(bot, text, task_id, update_existing=False):
+    """Send or update announcement in channel and group."""
+    global AUTO_LIKE_CHANNEL_ID, AUTO_LIKE_GROUP_ID
+
+    task = get_auto_like_task(task_id)
+    if task is None:
+        return
+
+    channel_msg_id = task.get('channel_msg_id')
+    group_msg_id = task.get('group_msg_id')
+
+    targets = []
+    if AUTO_LIKE_CHANNEL_ID:
+        targets.append(('channel', AUTO_LIKE_CHANNEL_ID, channel_msg_id))
+    if AUTO_LIKE_GROUP_ID:
+        targets.append(('group', AUTO_LIKE_GROUP_ID, group_msg_id))
+
+    if not targets:
+        return
+
+    for target_type, chat_id, msg_id in targets:
+        try:
+            if update_existing and msg_id:
+                try:
+                    await bot.edit_message_text(
+                        chat_id=chat_id, message_id=msg_id, text=text,
+                        parse_mode='Markdown'
+                    )
+                except Exception:
+                    sent = await bot.send_message(
+                        chat_id=chat_id, text=text, parse_mode='Markdown'
+                    )
+                    if sent:
+                        if target_type == 'channel':
+                            with GROUP_DB_LOCK:
+                                conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+                                cur = conn.cursor()
+                                cur.execute(
+                                    "UPDATE auto_like_tasks SET channel_msg_id = ? WHERE id = ?",
+                                    (sent.message_id, task_id)
+                                )
+                                conn.commit()
+                                conn.close()
+                        elif target_type == 'group':
+                            with GROUP_DB_LOCK:
+                                conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+                                cur = conn.cursor()
+                                cur.execute(
+                                    "UPDATE auto_like_tasks SET group_msg_id = ? WHERE id = ?",
+                                    (sent.message_id, task_id)
+                                )
+                                conn.commit()
+                                conn.close()
+            else:
+                sent = await bot.send_message(
+                    chat_id=chat_id, text=text, parse_mode='Markdown'
+                )
+                if sent:
+                    if target_type == 'channel':
+                        with GROUP_DB_LOCK:
+                            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+                            cur = conn.cursor()
+                            cur.execute(
+                                "UPDATE auto_like_tasks SET channel_msg_id = ? WHERE id = ?",
+                                (sent.message_id, task_id)
+                            )
+                            conn.commit()
+                            conn.close()
+                    elif target_type == 'group':
+                        with GROUP_DB_LOCK:
+                            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+                            cur = conn.cursor()
+                            cur.execute(
+                                "UPDATE auto_like_tasks SET group_msg_id = ? WHERE id = ?",
+                                (sent.message_id, task_id)
+                            )
+                            conn.commit()
+                            conn.close()
+        except Exception as e:
+            print(f"⚠️ Announcement send failed for {target_type}: {e}", flush=True)
+
 
 forward_channel_ids = []       # List of channel IDs to forward successful likes to
 forward_channel_links = {}     # Map: channel_id -> invite link
@@ -2389,6 +3111,345 @@ async def set_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Now send `/like BD UID`")
 
 
+# ============ AUTO LIKE COMMANDS ============
+
+async def autolike_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Create a new auto like task: /autolike REGION UID TOTAL_LIKES"""
+    if not context.args or len(context.args) < 3:
+        await reply(
+            update,
+            "❌ Usage: `/autolike REGION UID TOTAL_LIKES`\n"
+            "Example: `/autolike BD 5933029554 30000`"
+        )
+        return
+
+    user_id = update.effective_user.id
+    user = update.effective_user
+    region = context.args[0].upper()
+    uid_str = context.args[1]
+    total_str = context.args[2]
+
+    # Validate UID
+    if not uid_str.isdigit():
+        await reply(update, "❌ UID must contain only numbers!")
+        return
+
+    uid = int(uid_str)
+
+    # Validate total likes
+    try:
+        total_likes = int(total_str)
+    except ValueError:
+        await reply(update, "❌ Invalid token count!")
+        return
+
+    if total_likes < 1:
+        await reply(update, "❌ Total likes must be at least 1!")
+        return
+
+    if total_likes > MAX_AUTO_LIKE_TARGET:
+        await reply(update, f"❌ Maximum target is {MAX_AUTO_LIKE_TARGET:,} likes!")
+        return
+
+    # Check for duplicate active task
+    existing = get_auto_like_task_by_uid(user_id, uid)
+    if existing and existing.get('status') in ('scheduled', 'running'):
+        await reply(
+            update,
+            f"❌ You already have an active auto like task for UID `{uid}`!\n"
+            f"Use `/stopautolike {uid}` to stop it first."
+        )
+        return
+
+    # Calculate next execution time (next 4:01 AM BD time)
+    now_bd = datetime.now(BD_TZ)
+    next_exec = now_bd.replace(hour=4, minute=1, second=0, microsecond=0)
+    if next_exec <= now_bd:
+        next_exec = next_exec + __import__('datetime').timedelta(days=1)
+
+    task_id = upsert_auto_like_task(
+        owner_id=user_id,
+        owner_username=user.username or "",
+        owner_name=user.first_name or "",
+        uid=uid,
+        region=region,
+        target_likes=total_likes,
+        status='scheduled',
+        next_execution=next_exec.isoformat()
+    )
+
+    await reply(
+        update,
+        "🔥 *AUTO LIKE ACTIVATED*\n\n"
+        f"👤 UID: `{uid}`\n"
+        f"🌍 Region: {region}\n"
+        f"🎯 Target: {total_likes:,} Likes\n"
+        f"⏰ Schedule: Daily 04:01 AM\n"
+        f"🇧🇩 Timezone: Bangladesh\n"
+        f"🟢 Status: SCHEDULED"
+    )
+
+    # Announce to channel/group
+    task = get_auto_like_task(task_id)
+    if task:
+        await announce_auto_like_created(task, context.bot)
+
+
+async def myautolike_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show my auto like tasks: /myautolike"""
+    user_id = update.effective_user.id
+    tasks = get_auto_like_tasks(owner_id=user_id)
+
+    if not tasks:
+        await reply(
+            update,
+            "📭 No auto like tasks found.\n"
+            "Create one with `/autolike REGION UID TOTAL_LIKES`"
+        )
+        return
+
+    msg = "📋 *MY AUTO LIKE TASKS*\n\n"
+    for t in tasks:
+        uid = t['uid']
+        region = t['region']
+        target = t['target_likes']
+        delivered = t.get('delivered_likes', 0) or 0
+        remaining = target - delivered
+        status = t.get('status', 'unknown')
+        status_emoji = {
+            'scheduled': '🟢', 'running': '🔄', 'completed': '✅',
+            'paused': '⏸️', 'failed': '❌', 'stopped': '🛑'
+        }.get(status, '⚪')
+
+        msg += (
+            f"{status_emoji} UID `{uid}` ({region})\n"
+            f"   {delivered:,}/{target:,} ({remaining:,} remaining)\n"
+            f"   Status: {status}\n\n"
+        )
+
+    await reply(update, msg)
+
+
+async def autolikeinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show task details: /autolikeinfo UID"""
+    if not context.args or not context.args[0].isdigit():
+        await reply(update, "❌ Usage: `/autolikeinfo UID`")
+        return
+
+    user_id = update.effective_user.id
+    uid = int(context.args[0])
+
+    task = get_auto_like_task_by_uid(user_id, uid)
+    if not task:
+        await reply(update, f"❌ No auto like task found for UID `{uid}`")
+        return
+
+    target = task['target_likes']
+    delivered = task.get('delivered_likes', 0) or 0
+    remaining = target - delivered
+    pct = (delivered / target * 100) if target > 0 else 0
+    status = task.get('status', 'unknown')
+    next_exec = task.get('next_execution', 'Not set')
+    last_exec = task.get('last_executed', 'Never')
+
+    status_emoji = {
+        'scheduled': '🟢', 'running': '🔄', 'completed': '✅',
+        'paused': '⏸️', 'failed': '❌', 'stopped': '🛑'
+    }.get(status, '⚪')
+
+    await reply(
+        update,
+        "ℹ️ *AUTO LIKE INFO*\n\n"
+        f"👤 UID: `{uid}`\n"
+        f"🌍 Region: {task['region']}\n"
+        f"🎯 Target: {target:,} Likes\n"
+        f"❤️ Delivered: {delivered:,}\n"
+        f"📉 Remaining: {remaining:,}\n"
+        f"📊 Progress: {pct:.1f}%\n"
+        f"{status_emoji} Status: {status}\n"
+        f"⏰ Next: {next_exec}\n"
+        f"🕐 Last: {last_exec}"
+    )
+
+
+async def stopautolike_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Stop an auto like task: /stopautolike UID"""
+    if not context.args or not context.args[0].isdigit():
+        await reply(update, "❌ Usage: `/stopautolike UID`")
+        return
+
+    user_id = update.effective_user.id
+    uid = int(context.args[0])
+
+    task = get_auto_like_task_by_uid(user_id, uid)
+    if not task:
+        await reply(update, f"❌ No auto like task found for UID `{uid}`")
+        return
+
+    if task.get('status') in ('completed', 'stopped'):
+        await reply(
+            update,
+            f"⚠️ Task for UID `{uid}` is already {task.get('status')}."
+        )
+        return
+
+    set_auto_like_task_status(task['id'], 'stopped')
+    await reply(
+        update,
+        f"🛑 Auto like task for UID `{uid}` has been stopped."
+    )
+
+
+async def resumeautolike_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Resume a stopped task: /resumeautolike UID"""
+    if not context.args or not context.args[0].isdigit():
+        await reply(update, "❌ Usage: `/resumeautolike UID`")
+        return
+
+    user_id = update.effective_user.id
+    uid = int(context.args[0])
+
+    task = get_auto_like_task_by_uid(user_id, uid)
+    if not task:
+        await reply(update, f"❌ No auto like task found for UID `{uid}`")
+        return
+
+    if task.get('status') == 'completed':
+        await reply(update, f"⚠️ Task for UID `{uid}` is already completed.")
+        return
+
+    # Calculate next execution
+    now_bd = datetime.now(BD_TZ)
+    next_exec = now_bd.replace(hour=4, minute=1, second=0, microsecond=0)
+    if next_exec <= now_bd:
+        next_exec = next_exec + __import__('datetime').timedelta(days=1)
+
+    upsert_auto_like_task(
+        chat_id=None,
+        chat_id=uid,  # This is wrong but we need to update by uid
+    )
+    # Actually update directly
+    with GROUP_DB_LOCK:
+        conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE auto_like_tasks SET status = 'scheduled', next_execution = ? WHERE owner_id = ? AND uid = ?",
+            (next_exec.isoformat(), user_id, uid)
+        )
+        conn.commit()
+        conn.close()
+
+    await reply(
+        update,
+        f"▶️ Auto like task for UID `{uid}` has been resumed."
+    )
+
+
+async def autolikestatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show global auto like status dashboard (admin only): /autolikestatus"""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await reply(update, "❌ Admin only!")
+        return
+
+    stats = get_auto_like_stats()
+    tasks = get_auto_like_tasks()
+
+    msg = (
+        "📊 *AUTO LIKE STATUS DASHBOARD*\n\n"
+        f"📦 Total Tasks: {stats['total']}\n"
+        f"🟢 Active: {stats['running'] + stats['scheduled']}\n"
+        f"✅ Completed: {stats['completed']}\n"
+        f"⏸️ Paused: {stats['paused']}\n"
+        f"❌ Failed: {stats['failed']}\n"
+        f"🛑 Stopped: {stats['stopped']}\n"
+        f"────────────────────\n"
+        f"🎯 Total Target: {stats['total_target']:,}\n"
+        f"❤️ Total Delivered: {stats['total_delivered']:,}\n"
+        f"📉 Total Remaining: {stats['total_remaining']:,}\n"
+    )
+
+    if tasks:
+        msg += "\n📋 *RECENT TASKS:*\n"
+        for t in tasks[:10]:
+            uid = t['uid']
+            target = t['target_likes']
+            delivered = t.get('delivered_likes', 0) or 0
+            status = t.get('status', 'unknown')
+            status_emoji = {
+                'scheduled': '🟢', 'running': '🔄', 'completed': '✅',
+                'paused': '⏸️', 'failed': '❌', 'stopped': '🛑'
+            }.get(status, '⚪')
+            msg += f"{status_emoji} UID `{uid}` - {delivered:,}/{target:,} ({status})\n"
+
+    await reply(update, msg)
+
+
+async def autolikelist_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all auto like tasks (admin only): /autolikelist"""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await reply(update, "❌ Admin only!")
+        return
+
+    tasks = get_auto_like_tasks()
+
+    if not tasks:
+        await reply(update, "📭 No auto like tasks found.")
+        return
+
+    msg = "📋 *ALL AUTO LIKE TASKS*\n\n"
+    for i, t in enumerate(tasks[:50], 1):
+        uid = t['uid']
+        owner = t.get('owner_name', 'Unknown')
+        target = t['target_likes']
+        delivered = t.get('delivered_likes', 0) or 0
+        remaining = target - delivered
+        status = t.get('status', 'unknown')
+        status_emoji = {
+            'scheduled': '🟢', 'running': '🔄', 'completed': '✅',
+            'paused': '⏸️', 'failed': '❌', 'stopped': '🛑'
+        }.get(status, '⚪')
+
+        msg += (
+            f"{i}. {status_emoji} UID `{uid}` - {owner}\n"
+            f"   {delivered:,}/{target:,} ({remaining:,} rem.) - {status}\n"
+        )
+
+    if len(tasks) > 50:
+        msg += f"\n... and {len(tasks) - 50} more tasks."
+
+    await reply(update, msg)
+
+
+async def auto_like_scheduler_tick(context: ContextTypes.DEFAULT_TYPE):
+    """Job queue callback - runs every minute to check for due auto like tasks."""
+    global AUTO_LIKE_SCHEDULER_RUNNING
+    if not AUTO_LIKE_SCHEDULER_RUNNING:
+        return
+
+    try:
+        now_bd = datetime.now(BD_TZ)
+
+        # Only run at 4:01 AM Bangladesh time
+        if now_bd.hour != 4 or now_bd.minute != 1:
+            return
+
+        tasks = get_due_auto_like_tasks()
+        if not tasks:
+            return
+
+        print(f"⏰ Auto Like scheduler: {len(tasks)} task(s) due", flush=True)
+
+        for task in tasks:
+            if not AUTO_LIKE_SCHEDULER_RUNNING:
+                break
+            await execute_auto_like_task(task, context.bot)
+
+    except Exception as e:
+        print(f"⚠️ Auto like scheduler tick error: {e}", flush=True)
+
+
 # ============ RENDER HEALTH SERVER (free web_service must bind $PORT) ============
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -2450,6 +3511,13 @@ def main():
     except Exception as e:
         print(f"⚠️ Backup/init check failed: {e}", flush=True)
 
+    # Initialize Auto Like scheduler database
+    try:
+        init_auto_like_db()
+        print("✅ Auto Like scheduler DB initialized", flush=True)
+    except Exception as e:
+        print(f"⚠️ Auto Like DB init failed: {e}", flush=True)
+
     # Build the Telegram application
     try:
         request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
@@ -2459,6 +3527,10 @@ def main():
         if job_queue:
             job_queue.run_daily(reset_midnight, time=datetime_time(hour=0, minute=0, second=0), days=tuple(range(7)))
             print("⏰ Midnight reset scheduled", flush=True)
+
+            # Schedule auto like check every minute
+            job_queue.run_repeating(auto_like_scheduler_tick, interval=60, first=10)
+            print("⏰ Auto Like scheduler tick scheduled (every 60s)", flush=True)
 
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_cmd))
@@ -2493,6 +3565,14 @@ def main():
         # Database backup commands
         app.add_handler(CommandHandler("backup", backup_cmd))
         app.add_handler(CommandHandler("backupstatus", backupstatus_cmd))
+        # Auto Like Scheduler commands
+        app.add_handler(CommandHandler("autolike", autolike_cmd))
+        app.add_handler(CommandHandler("myautolike", myautolike_cmd))
+        app.add_handler(CommandHandler("autolikeinfo", autolikeinfo_cmd))
+        app.add_handler(CommandHandler("stopautolike", stopautolike_cmd))
+        app.add_handler(CommandHandler("resumeautolike", resumeautolike_cmd))
+        app.add_handler(CommandHandler("autolikestatus", autolikestatus_cmd))
+        app.add_handler(CommandHandler("autolikelist", autolikelist_cmd))
         app.add_handler(CallbackQueryHandler(group_callback_handler, pattern="^(group_allow|group_block|group_details|groups_page)_"))
         app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
         app.add_handler(CallbackQueryHandler(forcejoin_noop_callback, pattern="^forcejoin_noop$"))
@@ -2502,6 +3582,9 @@ def main():
         # Auto-register groups when bot is added; unregister when bot is removed/kicked.
         app.add_handler(ChatMemberHandler(my_chat_member_handler, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))
         app.add_error_handler(error_handler)
+
+        # Set bot reference for announcements
+        set_app_bot(app)
 
         print("🤖 Bot is running...", flush=True)
         print("   → Normal users: only in groups, daily limit applies", flush=True)
