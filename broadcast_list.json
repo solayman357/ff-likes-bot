@@ -1,4 +1,11 @@
 {
-  "chats": {},
+  "chats": {
+    "-1003757135843": {
+      "chat_id": -1003757135843,
+      "chat_type": "supergroup",
+      "title": "LIKE SELL",
+      "added_at": "2026-11-05"
+    }
+  },
   "users": {}
 }
