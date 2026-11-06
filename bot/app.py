@@ -1650,7 +1650,12 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/stopautolike UID` – Stop an auto-like task\n"
         "`/resumeautolike UID` – Resume an auto-like task\n"
         "`/autolikestatus` – All auto-like tasks (Admin only)\n"
-        "`/autolikelist` – List all auto-like tasks (Admin only)"
+        "`/autolikelist` – List all auto-like tasks (Admin only)\n\n"
+        "👑 *VIP commands:*\n"
+        "`/addvip <user_id>` – Add VIP user (Admin only)\n"
+        "`/removevip <user_id>` – Remove VIP user (Admin only)\n"
+        "`/vipstatus` – Check your VIP status\n"
+        "`/vipusers` – List all VIP users (Admin only)"
     )
     await reply(update, msg)
 
