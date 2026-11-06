@@ -276,6 +276,15 @@ AUTO_LIKE_GROUP_MSG_ID = None
 MAX_AUTO_LIKE_TARGET = 100000
 
 
+def _persist_auto_like_db():
+    """Queue the SQLite DB for GitHub persistence after an auto-like change."""
+    if github_persistence:
+        try:
+            github_persistence.queue_push('groups')
+        except Exception as e:
+            print(f"⚠️ GitHub queue failed for auto-like DB: {e}", flush=True)
+
+
 def init_auto_like_db():
     """Initialize the Auto Like scheduler tables in SQLite."""
     try:
@@ -398,6 +407,7 @@ def upsert_auto_like_task(owner_id, owner_username, owner_name, uid, region,
 
             conn.commit()
             conn.close()
+        _persist_auto_like_db()
         return task_id
     except Exception as e:
         print(f"⚠️ upsert_auto_like_task failed: {e}", flush=True)
@@ -511,6 +521,7 @@ def update_auto_like_task_progress(task_id, delivered_likes, status=None,
             )
             conn.commit()
             conn.close()
+        _persist_auto_like_db()
         return True
     except Exception as e:
         print(f"⚠️ update_auto_like_task_progress failed: {e}", flush=True)
@@ -536,6 +547,7 @@ def add_auto_like_history(task_id, owner_id, uid, region, likes_delivered,
             )
             conn.commit()
             conn.close()
+        _persist_auto_like_db()
     except Exception as e:
         print(f"⚠️ add_auto_like_history failed: {e}", flush=True)
 
@@ -618,6 +630,7 @@ def reset_stale_running_tasks():
             conn.close()
         if n:
             print(f"♻️ Reset {n} stale running auto-like task(s)", flush=True)
+            _persist_auto_like_db()
     except Exception as e:
         print(f"⚠️ reset_stale_running_tasks failed: {e}", flush=True)
 
@@ -635,6 +648,8 @@ def set_auto_like_task_status(task_id, status):
             conn.commit()
             changed = cur.rowcount > 0
             conn.close()
+        if changed:
+            _persist_auto_like_db()
         return changed
     except Exception as e:
         print(f"⚠️ set_auto_like_task_status failed: {e}", flush=True)
@@ -780,6 +795,48 @@ def reschedule_auto_like_after_failure(task_id, retry_count):
     )
 
 
+async def forward_auto_like_success(result, region, uid, actual_given,
+                                    before, after, delivered, target_likes):
+    """Post an auto-like success summary to every configured forward channel."""
+    bot = app_bot_instance
+    if bot is None:
+        return
+
+    nickname = result.get('PlayerNickname') or 'Unknown'
+    actual_uid = result.get('UID', uid)
+    level = result.get('Level', 0) or 0
+
+    msg = (
+        "🔥 AUTO LIKE SUCCESS 🔥\n\n"
+        f"👤 Player: {nickname}\n"
+        f"🏷️ UID: {actual_uid}\n"
+        f"🌍 Region: {region}\n"
+        f"⭐ Level: {level}\n\n"
+        f"❤️ Likes given: +{actual_given}\n"
+        f"📊 Total: {before} → {after}\n\n"
+        f"🎯 Progress: {delivered:,}/{target_likes:,}\n"
+        f"🤖 Auto Like"
+    )
+
+    for fwd_channel_id in list(forward_channel_ids):
+        if not fwd_channel_id:
+            continue
+        sent_ok = False
+        for attempt in range(2):
+            try:
+                await bot.send_message(chat_id=fwd_channel_id, text=msg)
+                print(f"✅ Auto-like success forwarded to {fwd_channel_id}", flush=True)
+                sent_ok = True
+                break
+            except Exception as e:
+                print(f"⚠️ Auto-like forward attempt {attempt + 1} failed "
+                      f"for {fwd_channel_id}: {e}", flush=True)
+                if attempt == 0:
+                    await asyncio.sleep(2)
+        if not sent_ok:
+            print(f"❌ Auto-like forward failed for {fwd_channel_id} after retries", flush=True)
+
+
 async def execute_auto_like_task(task):
     """Execute a single auto like task via the existing API."""
     task_id = task['id']
@@ -850,6 +907,13 @@ async def execute_auto_like_task(task):
 
             print(f"✅ Auto like task {task_id}: +{actual_given} likes "
                   f"({new_delivered}/{target_likes})", flush=True)
+
+            # Post the success to the same channels used by manual /like
+            if actual_given > 0:
+                await forward_auto_like_success(
+                    result, region, uid, actual_given,
+                    before, after, new_delivered, target_likes
+                )
 
             # Announce progress
             if AUTO_LIKE_BROADCAST_ENABLED:
@@ -1178,8 +1242,8 @@ def load_data():
         force_join = bool(cfg.get('force_join', force_join))
         force_join_channels = list(cfg.get('force_join_channels', force_join_channels) or [])
         force_join_links = dict(cfg.get('force_join_links', force_join_links) or {})
-        forward_channel_ids = list(cfg.get('forward_channel_ids', forward_channel_ids) or [])
-        forward_channel_links = dict(cfg.get('forward_channel_links', forward_channel_links) or {})
+        forward_channel_ids = list(cfg.get('forward_channel_ids') or [])
+        forward_channel_links = dict(cfg.get('forward_channel_links') or {})
 
         # Backward compatibility: if forward_channel_ids is empty but forward_channel_id exists,
         # migrate the single value to the list
@@ -1188,6 +1252,15 @@ def load_data():
             if old_single:
                 forward_channel_ids = [old_single]
                 print(f"🔄 Migrated forward_channel_id '{old_single}' to forward_channel_ids list", flush=True)
+
+        # Never let an empty persisted config silently disable forwarding.
+        # (The bot-data branch previously stored forward_channel_ids: [].)
+        DEFAULT_FORWARD_IDS = ["@autolikespro", "@FFAUTOLIKESPRO1"]
+        if not forward_channel_ids:
+            forward_channel_ids = list(DEFAULT_FORWARD_IDS)
+            print("🛟 forward_channel_ids was empty in config - restored defaults", flush=True)
+        for _cid in DEFAULT_FORWARD_IDS:
+            forward_channel_links.setdefault(_cid, f"https://t.me/{_cid.lstrip('@')}")
 
     # Migrate stored force-join channel identifiers (e.g. "channel-1" -> "@FFLIKESPRO2")
     try:
@@ -1777,8 +1850,15 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 print(f"✅ Forwarded successful like to {fwd_channel_id}", flush=True)
             except Exception as e:
-                # Log the error but never break the successful like operation.
-                print(f"⚠️ Failed to forward successful like to {fwd_channel_id}: {e}", flush=True)
+                # Native forward can fail (e.g. protected content / permissions).
+                # Fall back to posting the exact same text so it never goes missing.
+                print(f"⚠️ Forward failed to {fwd_channel_id}: {e} - trying direct copy", flush=True)
+                try:
+                    await context.bot.send_message(chat_id=fwd_channel_id, text=result)
+                    print(f"✅ Fallback copy sent to {fwd_channel_id}", flush=True)
+                except Exception as e2:
+                    # Log the error but never break the successful like operation.
+                    print(f"❌ Both forward and fallback failed for {fwd_channel_id}: {e2}", flush=True)
 
 # ============ JWT TOKEN UPLOAD HANDLER ============
 # Broadcast list file
