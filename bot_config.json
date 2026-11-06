@@ -23,5 +23,7 @@
     "@FFAUTOLIKESPRO1": "https://t.me/FFAUTOLIKESPRO1"
   },
   "forward_channel_id": "@autolikespro",
-  "forward_channel_link": "https://t.me/autolikespro"
+  "forward_channel_link": "https://t.me/autolikespro",
+  "auto_like_channel_id": "@FFAUTOLIKESPRO1",
+  "auto_like_group_id": -1003951085541
 }
