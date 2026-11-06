@@ -50,6 +50,7 @@ PERSISTED_FILES: Dict[str, str] = {
     "groups": "group_management.db",
     "lang": "user_lang.json",
     "history": "like_history.json",
+    "uid_daily": "user_uid_daily.json",
 }
 
 DEFAULT_REPO = "solayman357/ff-likes-bot"

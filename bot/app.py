@@ -44,6 +44,7 @@ DATA_FILES = {
     'config': 'bot_config.json',
     'lang': 'user_lang.json',
     'history': 'like_history.json',
+    'uid_daily': 'user_uid_daily.json',
 }
 
 # Token upload: bot forwards tokens to API's /upload-tokens endpoint
@@ -1199,6 +1200,7 @@ user_limits = {}
 user_cooldowns = {}  # {user_id: timestamp} cooldown tracking
 vip_users = set()
 user_lang = {}  # {user_id: "en" or "bn"}
+user_uid_daily = {}  # {user_id: {uid: True}} - one like per UID per day per user
 daily_limit = 2
 like_tokens = 240
 force_join = False
@@ -1235,6 +1237,7 @@ def load_data():
     user_limits = _read_json(DATA_FILES['users'], {})
     vip_users = set(_read_json(DATA_FILES['vip'], []))
     user_lang = {int(k): v for k, v in _read_json(DATA_FILES['lang'], {}).items()}
+    user_uid_daily = _read_json(DATA_FILES['uid_daily'], {})
     cfg = _read_json(DATA_FILES['config'], None)
     AUTO_LIKE_CHANNEL_ID = cfg.get('auto_like_channel_id') if isinstance(cfg, dict) else None
     AUTO_LIKE_GROUP_ID = cfg.get('auto_like_group_id') if isinstance(cfg, dict) else None
@@ -1320,6 +1323,7 @@ def save_all():
         with open(DATA_FILES['users'], 'w') as f: json.dump(user_limits, f, indent=2)
         with open(DATA_FILES['vip'], 'w') as f: json.dump(sorted(list(vip_users)), f, indent=2)
         with open(DATA_FILES['lang'], 'w') as f: json.dump({str(k): v for k, v in user_lang.items()}, f, indent=2)
+        with open(DATA_FILES['uid_daily'], 'w') as f: json.dump(user_uid_daily, f, indent=2)
         with open(DATA_FILES['history'], 'w') as f: json.dump({}, f, indent=2)  # history appended in log_successful_like
         with open(DATA_FILES['config'], 'w') as f:
             json.dump({
@@ -1354,7 +1358,7 @@ def save_all():
 
     # Queue for GitHub sync (background, retried, never blocks the bot).
     if github_persistence:
-        for key in ('allowed', 'stats', 'users', 'config', 'groups', 'broadcast', 'likes', 'lang', 'history'):
+        for key in ('allowed', 'stats', 'users', 'config', 'groups', 'broadcast', 'likes', 'lang', 'history', 'uid_daily'):
             try:
                 github_persistence.queue_push(key)
             except Exception as e:
@@ -1501,32 +1505,50 @@ def is_admin(uid): return uid in ADMIN_IDS
 def is_vip(uid): return uid in vip_users
 def today_str(): return str(date.today())
 
-def can_user_like(uid):
-    if is_admin(uid) or is_vip(uid):
+def can_user_like(user_id, target_uid=None):
+    """Check if user can send a like.
+    
+    Admin/VIP: unlimited, no restrictions.
+    Normal users: one like per target UID per day, 30s cooldown between requests.
+    """
+    if is_admin(user_id) or is_vip(user_id):
         return True
     # Cooldown check: 30 seconds between likes
     now_ts = time.time()
-    last = user_cooldowns.get(uid, 0)
+    last = user_cooldowns.get(user_id, 0)
     if now_ts - last < 30:
         remaining = int(30 - (now_ts - last))
         return f"⏳ Please wait {remaining} seconds before next like!"
     t = today_str()
-    suid = str(uid)
-    if suid not in user_limits or user_limits[suid]['date'] != t:
-        user_limits[suid] = {'date': t, 'count': 0}
-        return True
-    if user_limits[suid]['count'] >= daily_limit:
-        return False
+    # Per-UID per-day tracking for normal users
+    if target_uid:
+        suid = str(user_id)
+        if suid not in user_uid_daily:
+            user_uid_daily[suid] = {}
+        # Clean old dates (keep only today)
+        user_uid_daily[suid] = {k: v for k, v in user_uid_daily[suid].items() if v == t}
+        if target_uid in user_uid_daily[suid]:
+            return f"⚠️ You already sent a like to UID `{target_uid}` today!\n💡 You can like again after midnight (12:00 AM)."
+        # Also enforce daily_limit as a safety cap
+        if suid not in user_limits or user_limits[suid].get('date') != t:
+            user_limits[suid] = {'date': t, 'count': 0}
+        if user_limits[suid]['count'] >= daily_limit:
+            return f"⚠️ Daily limit reached! You have used `{user_limits[suid]['count']}/{daily_limit}` likes today.\n💡 Try again after midnight."
     return True
 
-def update_user_like(uid):
-    if is_admin(uid) or is_vip(uid):
+def update_user_like(user_id, target_uid=None):
+    """Record a like for a user."""
+    if is_admin(user_id) or is_vip(user_id):
         return
     # Set cooldown timestamp
-    user_cooldowns[uid] = time.time()
+    user_cooldowns[user_id] = time.time()
     t = today_str()
-    suid = str(uid)
-    if suid not in user_limits or user_limits[suid]['date'] != t:
+    suid = str(user_id)
+    if target_uid:
+        if suid not in user_uid_daily:
+            user_uid_daily[suid] = {}
+        user_uid_daily[suid][target_uid] = t
+    if suid not in user_limits or user_limits[suid].get('date') != t:
         user_limits[suid] = {'date': t, 'count': 0}
     user_limits[suid]['count'] += 1
     
@@ -1575,10 +1597,11 @@ def is_group_allowed(chat_id, chat_type):
     return db_allowed or legacy_allowed
 
 async def reset_midnight(context: ContextTypes.DEFAULT_TYPE):
-    global user_limits
+    global user_limits, user_uid_daily
     user_limits = {}
+    user_uid_daily = {}
     save_all()
-    print(f"[{datetime.now()}] ✅ Daily limits reset")
+    print(f"[{datetime.now()}] ✅ Daily limits reset (including per-UID tracking)")
 
 async def block_non_admin_private(update: Update) -> bool:
     chat_type = update.effective_chat.type
@@ -1795,7 +1818,7 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_id = update.effective_user.id
-    like_check = can_user_like(user_id)
+    like_check = can_user_like(user_id, uid)
     if like_check is not True:
         if isinstance(like_check, str):
             await reply(update, like_check)
@@ -1889,7 +1912,7 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_rem = data.get('remains', 'N/A')
 
     if status == 1:
-        update_user_like(user_id)
+        update_user_like(user_id, uid)
         # Persist successful like history
         log_successful_like(uid, region, given, before, after, user_id)
         save_all()
