@@ -7,7 +7,7 @@ import time
 import requests
 import aiohttp
 import asyncio
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from datetime import time as datetime_time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -301,9 +301,16 @@ def init_auto_like_db():
                     next_execution TEXT,
                     channel_msg_id INTEGER,
                     group_msg_id INTEGER,
+                    retry_count INTEGER DEFAULT 0,
                     UNIQUE(owner_id, uid)
                 )
             """)
+
+            # Migration for databases created before retry_count existed
+            try:
+                cur.execute("ALTER TABLE auto_like_tasks ADD COLUMN retry_count INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
             # Auto like execution history table
             cur.execute("""
@@ -470,7 +477,8 @@ def get_auto_like_task_by_uid(owner_id, uid):
 
 
 def update_auto_like_task_progress(task_id, delivered_likes, status=None,
-                                    last_executed=None, next_execution=None):
+                                    last_executed=None, next_execution=None,
+                                    retry_count=None):
     """Update task progress after execution."""
     try:
         with GROUP_DB_LOCK:
@@ -495,10 +503,11 @@ def update_auto_like_task_progress(task_id, delivered_likes, status=None,
             cur.execute(
                 "UPDATE auto_like_tasks SET "
                 "delivered_likes = ?, status = ?, updated_at = ?, "
-                "last_executed = ?, next_execution = ? "
+                "last_executed = ?, next_execution = ?, "
+                "retry_count = COALESCE(?, retry_count) "
                 "WHERE id = ?",
                 (new_delivered, new_status, now,
-                 last_executed, next_execution, task_id)
+                 last_executed, next_execution, retry_count, task_id)
             )
             conn.commit()
             conn.close()
@@ -561,7 +570,7 @@ def get_due_auto_like_tasks():
             now = datetime.now(BD_TZ).isoformat()
             cur.execute(
                 "SELECT * FROM auto_like_tasks "
-                "WHERE status IN ('scheduled', 'paused', 'resumed') "
+                "WHERE status IN ('scheduled', 'resumed') "
                 "AND next_execution IS NOT NULL "
                 "AND next_execution <= ? "
                 "ORDER BY next_execution ASC",
@@ -573,6 +582,44 @@ def get_due_auto_like_tasks():
     except Exception as e:
         print(f"⚠️ get_due_auto_like_tasks failed: {e}", flush=True)
         return []
+
+
+def claim_auto_like_task(task_id):
+    """Atomically mark a due task as running so two runs cannot pick it up."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE auto_like_tasks SET status = 'running', updated_at = ? "
+                "WHERE id = ? AND status IN ('scheduled', 'resumed')",
+                (datetime.now().isoformat(), task_id)
+            )
+            conn.commit()
+            claimed = cur.rowcount > 0
+            conn.close()
+        return claimed
+    except Exception as e:
+        print(f"⚠️ claim_auto_like_task failed: {e}", flush=True)
+        return False
+
+
+def reset_stale_running_tasks():
+    """On startup return tasks stuck in 'running' (e.g. after a crash) to scheduled."""
+    try:
+        with GROUP_DB_LOCK:
+            conn = sqlite3.connect(AUTO_LIKE_DB_FILE)
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE auto_like_tasks SET status = 'scheduled' WHERE status = 'running'"
+            )
+            n = cur.rowcount
+            conn.commit()
+            conn.close()
+        if n:
+            print(f"♻️ Reset {n} stale running auto-like task(s)", flush=True)
+    except Exception as e:
+        print(f"⚠️ reset_stale_running_tasks failed: {e}", flush=True)
 
 
 def set_auto_like_task_status(task_id, status):
@@ -653,6 +700,86 @@ def get_auto_like_stats():
 
 # ============ AUTO LIKE EXECUTION ============
 
+async def ensure_fresh_tokens():
+    """Make sure the API has at least one valid JWT before an auto-like run.
+
+    The API refreshes on startup, but Render's free instance may have been
+    asleep; a cold start + full refresh can take a couple of minutes. We poll
+    /refresh_status and trigger /refresh when the bank is empty.
+    """
+    base = API_URL.rstrip('/')
+    key = API_KEY
+    try:
+        status = None
+        for _ in range(3):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{base}/refresh_status?key={key}",
+                        timeout=aiohttp.ClientTimeout(total=90)
+                    ) as resp:
+                        if resp.status == 200:
+                            status = await resp.json()
+                            break
+            except Exception:
+                await asyncio.sleep(5)
+
+        valid = int((status or {}).get("valid_tokens_in_bank", 0) or 0)
+        running = bool((status or {}).get("refresh_running"))
+        if valid > 0 and not running:
+            return True
+
+        print(f"🔄 Auto like: token bank low (valid={valid}) - triggering refresh", flush=True)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{base}/refresh?key={key}",
+                    timeout=aiohttp.ClientTimeout(total=90)
+                ) as resp:
+                    await resp.read()
+        except Exception as e:
+            print(f"⚠️ Auto like: refresh trigger failed: {e}", flush=True)
+
+        # Wait up to ~4 minutes for the refresh to finish
+        for _ in range(24):
+            await asyncio.sleep(10)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{base}/refresh_status?key={key}",
+                        timeout=aiohttp.ClientTimeout(total=60)
+                    ) as resp:
+                        data = await resp.json()
+                if not data.get("refresh_running"):
+                    valid = int(data.get("valid_tokens_in_bank", 0) or 0)
+                    print(f"🔄 Auto like: token refresh finished (valid={valid})", flush=True)
+                    return valid > 0
+            except Exception:
+                pass
+        return False
+    except Exception as e:
+        print(f"⚠️ ensure_fresh_tokens error: {e}", flush=True)
+        return False
+
+
+def reschedule_auto_like_after_failure(task_id, retry_count):
+    """Back off after a failed attempt so we don't hammer the API every minute."""
+    now_bd = datetime.now(BD_TZ)
+    if retry_count >= 6:
+        next_exec = (now_bd + timedelta(days=1)).replace(
+            hour=4, minute=1, second=0, microsecond=0)
+        new_retry = 0
+    else:
+        next_exec = now_bd + timedelta(minutes=20)
+        new_retry = retry_count + 1
+    update_auto_like_task_progress(
+        task_id, 0, status='scheduled',
+        last_executed=now_bd.isoformat(),
+        next_execution=next_exec.isoformat(),
+        retry_count=new_retry,
+    )
+
+
 async def execute_auto_like_task(task):
     """Execute a single auto like task via the existing API."""
     task_id = task['id']
@@ -661,6 +788,7 @@ async def execute_auto_like_task(task):
     owner_id = task['owner_id']
     target_likes = task['target_likes']
     delivered_likes = task.get('delivered_likes', 0) or 0
+    retry_count = task.get('retry_count', 0) or 0
 
     remaining = target_likes - delivered_likes
     if remaining <= 0:
@@ -682,12 +810,13 @@ async def execute_auto_like_task(task):
                 0, 0, 'failed', error_msg
             )
             print(f"⚠️ Auto like task {task_id} failed: {error_msg}", flush=True)
+            reschedule_auto_like_after_failure(task_id, retry_count)
             return
 
         status = result.get('status')
-        likes_given = result.get('LikesGivenByAPI', 0)
-        before = result.get('LikesbeforeCommand', 0)
-        after = result.get('LikesafterCommand', 0)
+        likes_given = result.get('LikesGivenByAPI', 0) or 0
+        before = result.get('LikesbeforeCommand', 0) or 0
+        after = result.get('LikesafterCommand', 0) or 0
 
         if status == 1:
             # Successful likes
@@ -697,16 +826,21 @@ async def execute_auto_like_task(task):
             new_delivered = delivered_likes + actual_given
             new_remaining = target_likes - new_delivered
 
-            # Update task progress
+            if new_remaining <= 0:
+                next_exec = None
+                new_status = 'completed'
+            else:
+                next_exec = (datetime.now(BD_TZ) + timedelta(days=1)).replace(
+                    hour=4, minute=1, second=0, microsecond=0).isoformat()
+                new_status = 'scheduled'
+
+            # Update task progress (reset retry counter on success)
             update_auto_like_task_progress(
-                task_id, actual_gives if False else actual_given,
-                status='completed' if new_remaining <= 0 else 'scheduled',
+                task_id, actual_given,
+                status=new_status,
                 last_executed=datetime.now(BD_TZ).isoformat(),
-                next_execution=(
-                    (datetime.now(BD_TZ) + __import__('datetime').timedelta(days=1))
-                    .replace(hour=4, minute=1, second=0, microsecond=0)
-                    .isoformat()
-                ) if new_remaining > 0 else None
+                next_execution=next_exec,
+                retry_count=0,
             )
 
             add_auto_like_history(
@@ -735,6 +869,7 @@ async def execute_auto_like_task(task):
                 f"API status {status}: Likes not given"
             )
             print(f"⚠️ Auto like task {task_id}: API status {status}, no likes given", flush=True)
+            reschedule_auto_like_after_failure(task_id, retry_count)
 
     except Exception as e:
         print(f"⚠️ execute_auto_like_task {task_id} error: {e}", flush=True)
@@ -742,6 +877,7 @@ async def execute_auto_like_task(task):
             task_id, owner_id, uid, region, 0,
             0, 0, 'failed', str(e)[:200]
         )
+        reschedule_auto_like_after_failure(task_id, retry_count)
 
 
 async def auto_like_scheduler_loop():
@@ -3438,28 +3574,34 @@ async def autolikelist_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def auto_like_scheduler_tick(context: ContextTypes.DEFAULT_TYPE):
-    """Job queue callback - runs every minute to check for due auto like tasks."""
+    """Runs every minute and executes any task whose next_execution is due.
+
+    There is deliberately no clock gate: if the Render free instance was asleep
+    at 04:01, the task is still picked up as soon as the bot wakes (catch-up).
+    """
     global AUTO_LIKE_SCHEDULER_RUNNING
-    if not AUTO_LIKE_SCHEDULER_RUNNING:
-        return
+    AUTO_LIKE_SCHEDULER_RUNNING = True
 
     try:
-        now_bd = datetime.now(BD_TZ)
-
-        # Only run at 4:01 AM Bangladesh time
-        if now_bd.hour != 4 or now_bd.minute != 1:
-            return
-
         tasks = get_due_auto_like_tasks()
         if not tasks:
             return
 
         print(f"⏰ Auto Like scheduler: {len(tasks)} task(s) due", flush=True)
 
+        # Make sure the API has usable JWTs before spending the run
+        await ensure_fresh_tokens()
+
         for task in tasks:
-            if not AUTO_LIKE_SCHEDULER_RUNNING:
-                break
-            await execute_auto_like_task(task, context.bot)
+            # Claim atomically: a second instance / overlapping run skips it.
+            if not claim_auto_like_task(task['id']):
+                continue
+            try:
+                await execute_auto_like_task(task)
+            except Exception as e:
+                print(f"⚠️ Auto like task {task.get('id')} crashed: {e}", flush=True)
+                reschedule_auto_like_after_failure(
+                    task['id'], task.get('retry_count', 0) or 0)
 
     except Exception as e:
         print(f"⚠️ Auto like scheduler tick error: {e}", flush=True)
@@ -3501,6 +3643,36 @@ def start_health_server():
     print("❌ Health server could not bind to any port", flush=True)
 
 
+def start_keep_alive():
+    """Ping this service's public URL so Render's free tier does not sleep.
+
+    Render only counts *inbound* HTTP traffic as activity, and Telegram polling
+    is outbound, so without this the instance spins down after ~15 minutes and
+    both user commands and the 04:01 auto-like run are missed.
+    """
+    public_url = (
+        os.environ.get("RENDER_EXTERNAL_URL")
+        or os.environ.get("SERVICE_URL")
+        or "https://ff-likes-bot-2-cvef.onrender.com"
+    ).rstrip("/")
+    try:
+        interval = int(os.environ.get("KEEPALIVE_MINUTES", "10")) * 60
+    except Exception:
+        interval = 600
+
+    def _loop():
+        time.sleep(60)  # let the app finish booting
+        while True:
+            try:
+                requests.get(f"{public_url}/health", timeout=30)
+            except Exception:
+                pass
+            time.sleep(interval)
+
+    threading.Thread(target=_loop, daemon=True).start()
+    print(f"💓 Keep-alive pinger started: {public_url}/health every {interval // 60} min", flush=True)
+
+
 # ============ MAIN ============
 def main():
     global github_persistence
@@ -3513,15 +3685,22 @@ def main():
     except Exception as e:
         print(f"❌ Health server failed: {e}", flush=True)
 
+    # Keep the free-tier instance awake (Telegram polling is outbound and
+    # does not count as Render activity on its own).
+    try:
+        start_keep_alive()
+    except Exception as e:
+        print(f"❌ Keep-alive failed: {e}", flush=True)
+
     try:
         load_data()
     except Exception as e:
         print(f"❌ load_data failed: {e}", flush=True)
 
-    # Initialize Auto Like scheduler database
+    # Initialize Auto Like scheduler database (function prints its own status)
     try:
         init_auto_like_db()
-        print("✅ Auto Like scheduler DB initialized", flush=True)
+        reset_stale_running_tasks()
     except Exception as e:
         print(f"⚠️ Auto Like DB init failed: {e}", flush=True)
 
@@ -3623,34 +3802,6 @@ def main():
         while True:
             time.sleep(60)
 
-
-if __name__ == "__main__":
-    main()
-if __name__ == "__main__":
-    main()
-if __name__ == "__main__":
-    main()
-if __name__ == "__main__":
-    main()
-if __name__ == "__main__":
-    main()
-if __name__ == "__main__":
-    main()
-if __name__ == "__main__":
-    main()
-
-if __name__ == "__main__":
-    main()
-    main()
-if __name__ == "__main__":
-    main()
-
-if __name__ == "__main__":
-    main()
-    main()
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()
