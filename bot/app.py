@@ -1655,7 +1655,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/addvip <user_id>` – Add VIP user (Admin only)\n"
         "`/removevip <user_id>` – Remove VIP user (Admin only)\n"
         "`/vipstatus` – Check your VIP status\n"
-        "`/vipusers` – List all VIP users (Admin only)"
+        "`/vipusers` – List all VIP users (Admin only)\n\n"
+        "📢 *Auto Like Announcement commands:*\n"
+        "`/setautolikechannel @channel` – Set announcement channel\n"
+        "`/setautolikegroup <group_id>` – Set announcement group\n"
+        "`/autolikeannouncestatus` – Show announcement config"
     )
     await reply(update, msg)
 
@@ -2986,6 +2990,58 @@ async def vipusers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply(update, msg)
 
 
+# ============ AUTO LIKE ANNOUNCEMENT COMMANDS ============
+async def setautolikechannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set the channel for auto-like announcements: /setautolikechannel @channel"""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    if len(context.args) != 1:
+        await reply(update, "❌ Usage: `/setautolikechannel @channel`\nExample: `/setautolikechannel @autolikespro`")
+        return
+    global AUTO_LIKE_CHANNEL_ID
+    AUTO_LIKE_CHANNEL_ID = context.args[0].strip()
+    save_all()
+    await reply(update, f"✅ Auto-like announcement channel set to: `{AUTO_LIKE_CHANNEL_ID}`")
+
+
+async def setautolikegroup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set the group for auto-like announcements: /setautolikegroup <group_id>"""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    if len(context.args) != 1:
+        await reply(update, "❌ Usage: `/setautolikegroup <group_id>`\nExample: `/setautolikegroup -1001234567890`")
+        return
+    try:
+        gid = int(context.args[0].strip())
+    except ValueError:
+        await reply(update, "❌ Group ID must be a number (e.g., -1001234567890)")
+        return
+    global AUTO_LIKE_GROUP_ID
+    AUTO_LIKE_GROUP_ID = gid
+    save_all()
+    await reply(update, f"✅ Auto-like announcement group set to: `{AUTO_LIKE_GROUP_ID}`")
+
+
+async def autolikeannouncestatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show auto-like announcement configuration: /autolikeannouncestatus"""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    enabled = "✅ ON" if AUTO_LIKE_BROADCAST_ENABLED else "❌ OFF"
+    ch = AUTO_LIKE_CHANNEL_ID or "Not set"
+    grp = AUTO_LIKE_GROUP_ID or "Not set"
+    msg = (
+        "📢 *AUTO LIKE ANNOUNCEMENT STATUS*\n\n"
+        f"🔔 Broadcast: {enabled}\n"
+        f"📺 Channel: `{ch}`\n"
+        f"👥 Group: `{grp}`\n\n"
+        "Use `/setautolikechannel @channel` and `/setautolikegroup <group_id>` to configure."
+    )
+    await reply(update, msg)
+
+
 # ============ LIKE MODE COMMANDS ============
 async def set_api_100(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """100-token mode (~100-110 likes per request)."""
@@ -3894,6 +3950,10 @@ def main():
         app.add_handler(CommandHandler("removevip", removevip_cmd))
         app.add_handler(CommandHandler("vipstatus", vipstatus_cmd))
         app.add_handler(CommandHandler("vipusers", vipusers_cmd))
+        # Auto-like announcement commands
+        app.add_handler(CommandHandler("setautolikechannel", setautolikechannel_cmd))
+        app.add_handler(CommandHandler("setautolikegroup", setautolikegroup_cmd))
+        app.add_handler(CommandHandler("autolikeannouncestatus", autolikeannouncestatus_cmd))
         app.add_handler(CommandHandler("setapi100", set_api_100))
         app.add_handler(CommandHandler("setapi", set_api))
         app.add_handler(CommandHandler("setapimax", set_api_max))
