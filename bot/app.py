@@ -1200,7 +1200,8 @@ user_limits = {}
 user_cooldowns = {}  # {user_id: timestamp} cooldown tracking
 vip_users = set()
 user_lang = {}  # {user_id: "en" or "bn"}
-user_uid_daily = {}  # {user_id: {uid: True}} - one like per UID per day per user
+user_uid_daily = {}  # {uid: date_str} - GLOBAL per-UID per-day lock (claimed by any normal user)
+uid_daily_lock = threading.Lock()  # Atomic access to user_uid_daily
 daily_limit = 2
 like_tokens = 240
 force_join = False
@@ -1238,6 +1239,19 @@ def load_data():
     vip_users = set(_read_json(DATA_FILES['vip'], []))
     user_lang = {int(k): v for k, v in _read_json(DATA_FILES['lang'], {}).items()}
     user_uid_daily = _read_json(DATA_FILES['uid_daily'], {})
+    # Migrate old format {user_id: {uid: date}} to new format {uid: date}
+    migrated = {}
+    if isinstance(user_uid_daily, dict):
+        for k, v in user_uid_daily.items():
+            if isinstance(v, dict):
+                # Old format: {user_id: {uid: date}} - flatten to {uid: date}
+                for uid, d in v.items():
+                    if isinstance(d, str):
+                        migrated[uid] = d
+            elif isinstance(v, str):
+                # Already new format: {uid: date}
+                migrated[k] = v
+    user_uid_daily = migrated
     cfg = _read_json(DATA_FILES['config'], None)
     AUTO_LIKE_CHANNEL_ID = cfg.get('auto_like_channel_id') if isinstance(cfg, dict) else None
     AUTO_LIKE_GROUP_ID = cfg.get('auto_like_group_id') if isinstance(cfg, dict) else None
@@ -1505,49 +1519,92 @@ def is_admin(uid): return uid in ADMIN_IDS
 def is_vip(uid): return uid in vip_users
 def today_str(): return str(date.today())
 
+def get_next_reset_time():
+    """Return the next Bangladesh midnight (12:00 AM Asia/Dhaka) as a datetime."""
+    now_bd = datetime.now(BD_TZ)
+    # Next midnight in BD time
+    next_midnight_bd = (now_bd + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return next_midnight_bd
+
+
 def can_user_like(user_id, target_uid=None):
-    """Check if user can send a like.
+    """Check if user can send a like request.
     
-    Admin/VIP: unlimited, no restrictions.
-    Normal users: one like per target UID per day, 30s cooldown between requests.
+    Admin/VIP: unlimited, no restrictions, never touch per-UID locks.
+    Normal users: ONE like per UID per Bangladesh day (GLOBAL lock - once any normal
+    user claims a UID today, no other normal user can claim it until reset).
+    Plus 30s cooldown and per-user daily_count safety cap.
+    
+    Returns True if allowed, or a string error message if blocked.
     """
     if is_admin(user_id) or is_vip(user_id):
         return True
+    
     # Cooldown check: 30 seconds between likes
     now_ts = time.time()
     last = user_cooldowns.get(user_id, 0)
     if now_ts - last < 30:
         remaining = int(30 - (now_ts - last))
-        return f"⏳ Please wait {remaining} seconds before next like!"
-    t = today_str()
-    # Per-UID per-day tracking for normal users
+        return f"⏳ Please wait {remaining} seconds before your next like request!"
+    
+    t = today_str()  # Bangladesh date string
+    
+    # STRICT GLOBAL per-UID per-day lock: check if this UID was already claimed
+    # by ANY normal user today
     if target_uid:
-        suid = str(user_id)
-        if suid not in user_uid_daily:
-            user_uid_daily[suid] = {}
-        # Clean old dates (keep only today)
-        user_uid_daily[suid] = {k: v for k, v in user_uid_daily[suid].items() if v == t}
-        if target_uid in user_uid_daily[suid]:
-            return f"⚠️ You already sent a like to UID `{target_uid}` today!\n💡 You can like again after midnight (12:00 AM)."
-        # Also enforce daily_limit as a safety cap
-        if suid not in user_limits or user_limits[suid].get('date') != t:
-            user_limits[suid] = {'date': t, 'count': 0}
-        if user_limits[suid]['count'] >= daily_limit:
-            return f"⚠️ Daily limit reached! You have used `{user_limits[suid]['count']}/{daily_limit}` likes today.\n💡 Try again after midnight."
+        with uid_daily_lock:
+            # Clean old entries (keep only today's claims)
+            uid_daily_clean = {uid: d for uid, d in user_uid_daily.items() if d == t}
+            user_uid_daily.clear()
+            user_uid_daily.update(uid_daily_clean)
+            
+            if target_uid in user_uid_daily:
+                next_reset = get_next_reset_time()
+                reset_str = next_reset.strftime("%I:%M %p %Z, %d %b %Y")
+                return (
+                    f"🚫 UID *`{target_uid}`* already claimed today!\n"
+                    f"📅 One like per UID per Bangladesh day.\n"
+                    f"⏰ Next reset: {reset_str}\n"
+                    f"💡 Try again after the daily reset."
+                )
+            
+            # Per-user daily count safety cap
+            suid = str(user_id)
+            if suid not in user_limits or user_limits[suid].get('date') != t:
+                user_limits[suid] = {'date': t, 'count': 0}
+            if user_limits[suid]['count'] >= daily_limit:
+                used = user_limits[suid]['count']
+                next_reset = get_next_reset_time()
+                reset_str = next_reset.strftime("%I:%M %p %Z, %d %b %Y")
+                return (
+                    f"⚠️ Daily limit reached!\n"
+                    f"📊 Used: `{used}/{daily_limit}` likes today\n"
+                    f"⏰ Next reset: {reset_str}"
+                )
+    
     return True
 
 def update_user_like(user_id, target_uid=None):
-    """Record a like for a user."""
+    """Record a like for a normal user (called ONLY after successful API response).
+    
+    Admin/VIP: never touch per-UID locks or user limits.
+    Normal users: record UID claim (global lock) and increment daily count.
+    """
     if is_admin(user_id) or is_vip(user_id):
         return
+    
     # Set cooldown timestamp
     user_cooldowns[user_id] = time.time()
+    
     t = today_str()
     suid = str(user_id)
+    
+    # Record GLOBAL per-UID per-day claim (only for normal users)
     if target_uid:
-        if suid not in user_uid_daily:
-            user_uid_daily[suid] = {}
-        user_uid_daily[suid][target_uid] = t
+        with uid_daily_lock:
+            user_uid_daily[target_uid] = t
+    
+    # Per-user daily count
     if suid not in user_limits or user_limits[suid].get('date') != t:
         user_limits[suid] = {'date': t, 'count': 0}
     user_limits[suid]['count'] += 1
@@ -1597,11 +1654,14 @@ def is_group_allowed(chat_id, chat_type):
     return db_allowed or legacy_allowed
 
 async def reset_midnight(context: ContextTypes.DEFAULT_TYPE):
+    """Reset all daily per-UID locks and user limits at Bangladesh midnight."""
     global user_limits, user_uid_daily
-    user_limits = {}
-    user_uid_daily = {}
+    with uid_daily_lock:
+        user_limits = {}
+        user_uid_daily = {}
     save_all()
-    print(f"[{datetime.now()}] ✅ Daily limits reset (including per-UID tracking)")
+    now_bd = datetime.now(BD_TZ)
+    print(f"[{now_bd.isoformat()}] ✅ Daily limits reset (per-UID locks cleared) - Bangladesh midnight")
 
 async def block_non_admin_private(update: Update) -> bool:
     chat_type = update.effective_chat.type
@@ -4175,7 +4235,7 @@ def main():
 
         job_queue = app.job_queue
         if job_queue:
-            job_queue.run_daily(reset_midnight, time=datetime_time(hour=0, minute=0, second=0), days=tuple(range(7)))
+            job_queue.run_daily(reset_midnight, time=datetime_time(hour=18, minute=0, second=0), days=tuple(range(7)))
             print("⏰ Midnight reset scheduled", flush=True)
 
             # Schedule auto like check every minute
@@ -4274,7 +4334,7 @@ def main():
                     app = Application.builder().token(BOT_TOKEN).request(request).build()
                     job_queue = app.job_queue
                     if job_queue:
-                        job_queue.run_daily(reset_midnight, time=datetime_time(hour=0, minute=0, second=0), days=tuple(range(7)))
+                        job_queue.run_daily(reset_midnight, time=datetime_time(hour=18, minute=0, second=0), days=tuple(range(7)))
                         job_queue.run_repeating(auto_like_scheduler_tick, interval=60, first=10)
                     app.add_handler(CommandHandler("start", start))
                     app.add_handler(CommandHandler("help", help_cmd))
