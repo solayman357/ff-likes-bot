@@ -41,7 +41,9 @@ DATA_FILES = {
     'stats': 'daily_stats.json',
     'users': 'user_limits.json',
     'vip': 'vip_users.json',
-    'config': 'bot_config.json'
+    'config': 'bot_config.json',
+    'lang': 'user_lang.json',
+    'history': 'like_history.json',
 }
 
 # Token upload: bot forwards tokens to API's /upload-tokens endpoint
@@ -1194,12 +1196,16 @@ bot_mode = "public"
 allowed_groups = {}
 daily_stats = {}
 user_limits = {}
+user_cooldowns = {}  # {user_id: timestamp} cooldown tracking
 vip_users = set()
+user_lang = {}  # {user_id: "en" or "bn"}
 daily_limit = 2
 like_tokens = 240
 force_join = False
 force_join_channels = []
 force_join_links = {}
+welcome_msg = "👋 Welcome to FF LIKES PRO BOT! Use /help to see all commands."
+goodbye_msg = "👋 Goodbye! Come back soon to FF LIKES PRO BOT."
 
 # GitHub persistence
 github_persistence = None
@@ -1228,6 +1234,7 @@ def load_data():
     daily_stats = _read_json(DATA_FILES['stats'], {})
     user_limits = _read_json(DATA_FILES['users'], {})
     vip_users = set(_read_json(DATA_FILES['vip'], []))
+    user_lang = {int(k): v for k, v in _read_json(DATA_FILES['lang'], {}).items()}
     cfg = _read_json(DATA_FILES['config'], None)
     AUTO_LIKE_CHANNEL_ID = cfg.get('auto_like_channel_id') if isinstance(cfg, dict) else None
     AUTO_LIKE_GROUP_ID = cfg.get('auto_like_group_id') if isinstance(cfg, dict) else None
@@ -1312,6 +1319,8 @@ def save_all():
         with open(DATA_FILES['stats'], 'w') as f: json.dump(daily_stats, f, indent=2)
         with open(DATA_FILES['users'], 'w') as f: json.dump(user_limits, f, indent=2)
         with open(DATA_FILES['vip'], 'w') as f: json.dump(sorted(list(vip_users)), f, indent=2)
+        with open(DATA_FILES['lang'], 'w') as f: json.dump({str(k): v for k, v in user_lang.items()}, f, indent=2)
+        with open(DATA_FILES['history'], 'w') as f: json.dump({}, f, indent=2)  # history appended in log_successful_like
         with open(DATA_FILES['config'], 'w') as f:
             json.dump({
                 'status': bot_status,
@@ -1345,7 +1354,7 @@ def save_all():
 
     # Queue for GitHub sync (background, retried, never blocks the bot).
     if github_persistence:
-        for key in ('allowed', 'stats', 'users', 'config', 'groups', 'broadcast', 'likes'):
+        for key in ('allowed', 'stats', 'users', 'config', 'groups', 'broadcast', 'likes', 'lang', 'history'):
             try:
                 github_persistence.queue_push(key)
             except Exception as e:
@@ -1495,16 +1504,26 @@ def today_str(): return str(date.today())
 def can_user_like(uid):
     if is_admin(uid) or is_vip(uid):
         return True
+    # Cooldown check: 30 seconds between likes
+    now_ts = time.time()
+    last = user_cooldowns.get(uid, 0)
+    if now_ts - last < 30:
+        remaining = int(30 - (now_ts - last))
+        return f"⏳ Please wait {remaining} seconds before next like!"
     t = today_str()
     suid = str(uid)
     if suid not in user_limits or user_limits[suid]['date'] != t:
         user_limits[suid] = {'date': t, 'count': 0}
         return True
-    return user_limits[suid]['count'] < daily_limit
+    if user_limits[suid]['count'] >= daily_limit:
+        return False
+    return True
 
 def update_user_like(uid):
     if is_admin(uid) or is_vip(uid):
         return
+    # Set cooldown timestamp
+    user_cooldowns[uid] = time.time()
     t = today_str()
     suid = str(uid)
     if suid not in user_limits or user_limits[suid]['date'] != t:
@@ -1601,18 +1620,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     # Register this chat for broadcasts (users + groups)
     register_chat(update)
-    msg = (
-        "✨ *𝑭𝑹𝑬𝑬 𝑭𝑰𝑹𝑬 𝑳𝑰𝑲𝑬 𝑩𝑶𝑻* ✨\n"
-        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
-        "💬 `/like REGION UID` – Send a like\n"
-        "💬 `/help` – Show all commands\n"
-        "💬 `/info` – Your remaining likes\n\n"
-        "📌 *Example:* `/like BD UID`\n"
-        f"🔥 Your daily limit: `{daily_limit}` likes\n"
-        "🌍 *Any region code works* (e.g., IND, USA, GER, etc.)\n"
-        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
-    )
-    await reply(update, msg)
+    await reply(update, welcome_msg)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_check(update, context): return
@@ -1621,54 +1629,104 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     register_chat(update)
     user_id = update.effective_user.id
+    is_adm = user_id in ADMIN_IDS
+    is_v = user_id in vip_users
+
     msg = (
-        "📖 *𝑪𝑶𝑴𝑴𝑨𝑵𝑫 𝑳𝑰𝑺𝑻*\n\n"
-        "🔹 `/like REGION UID` – Send likes\n"
-        "🔹 `/info` – Check your remaining likes\n"
-        "🔹 `/start` – Welcome message\n\n"
-        "*Example:* `/like BD UID`\n"
-        "*Supports any region* – just type the code.\n\n"
-        "👑 *Admin commands:*\n"
-        "`/allow` – Allow current group\n"
-        "`/registergroup <chat_id>` – Register a group\n"
-        "`/allowgroup <chat_id>` – Allow a group\n"
-        "`/blockgroup <chat_id>` – Block a group\n"
-        "`/syncgroups` – Sync groups from broadcast list\n"
-        "`/groups` – List and manage all groups (pagination)\n"
-        "`/off` / `/on` – Turn bot off/on\n"
-        "`/stats` – Today's usage\n"
-        "`/setprivate` / `/setpublic` – Change group mode\n"
-        "`/setlimit <num>` – Set daily limit per user\n"
-        "`/setapi100` – Set to 100 tokens (~100–110 likes)\n"
-        "`/setapi <num>` – Set custom tokens (10–400)\n"
-        "`/setapimax` or `/maxff` – Set to 400 tokens (max)\n"
-        "`/setforcejoin <channel> <link>` – Add required channel\n"
-        "`/addforcejoin <channel> <link>` – Add another required channel\n"
-        "`/removeforcejoin <channel>` – Remove one required channel\n"
-        "`/removeforcejoin all` – Remove all required channels\n"
-        "`/forcejoinlist` – List required channels\n"
-        "`/forcejoinstatus` – Show force-join configuration\n"
-        "`/forcejoinon` / `/forcejoinoff` – Enable/disable force join\n"
-        "`/broadcast <message>` – Send message to all users and groups\n"
-        "`/apistatus` – Show API token bank & configured tokens\n\n"
-        "🔥 *Auto Like commands:*\n"
-        "`/autolike REGION UID TOTAL` – Create auto-like task\n"
-        "`/myautolike` – View your auto-like tasks\n"
-        "`/autolikeinfo UID` – Task details & progress\n"
-        "`/stopautolike UID` – Stop an auto-like task\n"
-        "`/resumeautolike UID` – Resume an auto-like task\n"
-        "`/autolikestatus` – All auto-like tasks (Admin only)\n"
-        "`/autolikelist` – List all auto-like tasks (Admin only)\n\n"
-        "👑 *VIP commands:*\n"
-        "`/addvip <user_id>` – Add VIP user (Admin only)\n"
-        "`/removevip <user_id>` – Remove VIP user (Admin only)\n"
-        "`/vipstatus` – Check your VIP status\n"
-        "`/vipusers` – List all VIP users (Admin only)\n\n"
-        "📢 *Auto Like Announcement commands:*\n"
-        "`/setautolikechannel @channel` – Set announcement channel\n"
-        "`/setautolikegroup <group_id>` – Set announcement group\n"
-        "`/autolikeannouncestatus` – Show announcement config"
+        "╭─────────────────────────────────────────────╮\n"
+        "│ 💎 *𝑭𝑭 𝑳𝑰𝑲𝑬𝑺 𝑷RO — 𝑪𝑶𝑴𝑴𝑨𝑵𝑫 𝑴𝑬𝑵𝒰* │\n"
+        "╰─────────────────────────────────────────────╯\n\n"
     )
+
+    # USER SECTION
+    msg += "👤 *𝑼𝑺𝑬𝑹 𝑪𝑶𝑴𝑴𝑨𝑵𝑫𝑺*\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    msg += "🔹 `/start` — Welcome message\n"
+    msg += "🔹 `/help` — This command menu\n"
+    msg += "🔹 `/info` — Check your likes & VIP status\n"
+    msg += "🔹 `/like REGION UID` — Send Free Fire likes\n"
+    msg += "   📌 _Example: `/like BD 1234567890`_\n"
+    msg += "🔹 `/myautolike` — View your auto-like tasks\n"
+    msg += "🔹 `/vipstatus` — Check your VIP status\n"
+    msg += "🔹 `/setlang en|bn` — Change language\n"
+    msg += "🔹 `/leaderboard` — Top users today\n"
+    msg += "🔹 `/likehistory` — Your like history\n"
+    msg += "\n"
+
+    # VIP SECTION
+    if is_v:
+        msg += "👑 *𝑽𝑰𝑷 𝑺𝑻𝑨𝑻𝑼𝑺*\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += "🔥 *VIP ACTIVE* — Unlimited likes!\n"
+        msg += "💬 Private chat access enabled\n"
+        msg += "\n"
+
+    # ADMIN SECTION
+    if is_adm:
+        msg += "👑 *𝑨𝑫𝑴𝑰𝑵 𝑪𝑶𝑴𝑴𝑨𝑵𝑫𝑺*\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += "⚡ `/off` / `/on` — Turn bot off/on\n"
+        msg += "📊 `/stats` — Today's usage stats\n"
+        msg += "🔒 `/setprivate` / `/setpublic` — Group mode\n"
+        msg += "📋 `/setlimit <num>` — Daily like limit\n"
+        msg += "🔢 `/setapi100` — 100 tokens mode\n"
+        msg += "🔢 `/setapi <num>` — Custom tokens (10–400)\n"
+        msg += "🚀 `/setapimax` or `/maxff` — 400 tokens max\n"
+        msg += "\n"
+        msg += "🔗 *Force-Join:*\n"
+        msg += "   `/setforcejoin <ch> <link>` — Add channel\n"
+        msg += "   `/addforcejoin <ch> <link>` — Add more\n"
+        msg += "   `/removeforcejoin <ch>` / `all` — Remove\n"
+        msg += "   `/forcejoinlist` / `/forcejoinstatus` — View\n"
+        msg += "   `/forcejoinon` / `/forcejoinoff` — Toggle\n"
+        msg += "\n"
+        msg += "👥 *Group Management:*\n"
+        msg += "   `/registergroup <id>` — Register group\n"
+        msg += "   `/allowgroup <id>` / `/blockgroup <id>`\n"
+        msg += "   `/groups` — List all groups\n"
+        msg += "   `/syncgroups` — Sync from broadcast\n"
+        msg += "\n"
+        msg += "💾 *Backup & API:*\n"
+        msg += "   `/backup` / `/backupstatus`\n"
+        msg += "   `/apistatus` — Token bank info\n"
+        msg += "   `/broadcast <msg>` — Send to all\n"
+        msg += "   `/dailyreport` — Today's report\n"
+        msg += "   `/setwelcome` / `/setgoodbye` — Custom msgs\n"
+        msg += "\n"
+
+    # AUTO LIKE SECTION
+    msg += "🔥 *𝑨𝑼𝑻𝑶 𝑳𝑰𝑲𝑬 𝑪𝑶𝑴𝑴𝑨𝑵𝑫𝑺*\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    msg += "⚡ `/autolike REGION UID TOTAL` — Create task\n"
+    msg += "   _Schedule: Daily 04:01 AM BD_\n"
+    msg += "📋 `/autolikeinfo UID` — Task details\n"
+    msg += "⏹️ `/stopautolike UID` — Stop task\n"
+    msg += "▶️ `/resumeautolike UID` — Resume task\n"
+    msg += "📊 `/autolikestatus` — All tasks (admin)\n"
+    msg += "📋 `/autolikelist` — List all tasks (admin)\n"
+    msg += "\n"
+
+    # ANNOUNCEMENT SECTION
+    if is_adm:
+        msg += "📢 *𝑨𝑵𝑵𝑶𝑼𝑵𝑪𝑬𝑴𝑬𝑵𝑻 𝑪𝑶𝑴𝑴𝑨𝑵𝑫𝑺*\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += "📺 `/setautolikechannel @channel`\n"
+        msg += "👥 `/setautolikegroup <group_id>`\n"
+        msg += "ℹ️ `/autolikeannouncestatus` — View config\n"
+        msg += "\n"
+
+    # VIP ADMIN SECTION
+    if is_adm:
+        msg += "👑 *𝑽𝑰𝑷 𝑴𝑨𝑵𝑨𝑮𝑬𝑴𝑬𝑵𝑻 𝑪𝑶𝑴𝑴𝑨𝑵𝑫𝑺*\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += "➕ `/addvip <user_id>` — Add VIP user\n"
+        msg += "➖ `/removevip <user_id>` — Remove VIP\n"
+        msg += "📋 `/vipusers` — List all VIPs\n"
+        msg += "\n"
+
+    msg += "╭─────────────────────────────────────────────╮\n"
+    msg += "│ 🔥 Credits: @DCFsolayman                    │\n"
+    msg += "╰─────────────────────────────────────────────╯\n"
     await reply(update, msg)
 
 async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1737,7 +1795,11 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_id = update.effective_user.id
-    if not can_user_like(user_id):
+    like_check = can_user_like(user_id)
+    if like_check is not True:
+        if isinstance(like_check, str):
+            await reply(update, like_check)
+            return
         used = user_limits.get(str(user_id), {}).get('count', 0)
         await reply(update, f"⚠️ Daily limit reached!\nYou have used `{used}/{daily_limit}` likes today.\n💡 Try again tomorrow.")
         return
@@ -1898,6 +1960,7 @@ BROADCAST_FILE = "broadcast_list.json"
 
 # Successful likes log file
 LIKE_LOG_FILE = "successful_likes.json"
+LIKE_HISTORY_FILE = "like_history.json"  # Per-user like history
 
 
 def _load_broadcast_data():
@@ -2732,6 +2795,31 @@ def log_successful_like(uid, region, likes_given, before, after, user_id):
     with open(LIKE_LOG_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
+    # Also log to per-user history
+    try:
+        try:
+            with open(LIKE_HISTORY_FILE, "r") as f:
+                history = json.load(f)
+        except Exception:
+            history = {}
+        suid = str(user_id)
+        if suid not in history:
+            history[suid] = []
+        history[suid].append({
+            "target_uid": uid,
+            "region": region,
+            "likes_given": likes_given,
+            "before": before,
+            "after": after,
+            "timestamp": str(date.today())
+        })
+        # Keep only last 50 entries per user
+        history[suid] = history[suid][-50:]
+        with open(LIKE_HISTORY_FILE, "w") as f:
+            json.dump(history, f, indent=2)
+    except Exception as e:
+        print(f"⚠️ Like history save failed: {e}", flush=True)
+
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -3002,6 +3090,128 @@ async def vipusers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, uid in enumerate(sorted(vip_users), 1):
         msg += f"{i}. `{uid}`\n"
     msg += f"\nTotal: {len(vip_users)} VIP user(s)"
+    await reply(update, msg)
+
+
+# ============ LIKE HISTORY COMMAND ============
+async def likehistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View your like history: /likehistory [UID]"""
+    user_id = update.effective_user.id
+    target_uid = None
+    if context.args and context.args[0].isdigit():
+        target_uid = int(context.args[0])
+        if not is_admin(user_id) and not is_vip(user_id):
+            await reply(update, "❌ Admin/VIP only can check other users' history!")
+            return
+
+    suid = str(target_uid if target_uid else user_id)
+    try:
+        with open(LIKE_HISTORY_FILE, "r") as f:
+            history = json.load(f)
+    except Exception:
+        history = {}
+
+    user_history = history.get(suid, [])
+    if not user_history:
+        await reply(update, f"📭 No like history found for UID `{suid}`.")
+        return
+
+    msg = f"📜 *LIKE HISTORY — UID `{suid}`*\n\n"
+    for entry in user_history[-10:]:
+        msg += (
+            f"🎯 Target: `{entry['target_uid']}` | Region: {entry['region']}\n"
+            f"❤️ Likes: +{entry['likes_given']} ({entry['before']} → {entry['after']})\n"
+            f"📅 Date: {entry['timestamp']}\n"
+            f"────────────────────\n"
+        )
+    msg += f"\nTotal records: {len(user_history)} (showing last 10)"
+    await reply(update, msg)
+
+
+# ============ DAILY REPORT COMMAND ============
+async def dailyreport_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send daily report (admin only): /dailyreport"""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    t = today_str()
+    if t not in daily_stats or daily_stats[t]['total'] == 0:
+        await reply(update, f"📊 No like activity recorded for today ({t}).")
+        return
+    total = daily_stats[t]['total']
+    users_count = len(daily_stats[t]['users'])
+    top_users = sorted(daily_stats[t]['users'].items(), key=lambda x: x[1], reverse=True)[:5]
+    msg = (
+        f"📊 *DAILY REPORT — {t}*\n\n"
+        f"❤️ Total likes sent: `{total}`\n"
+        f"👥 Active users: `{users_count}`\n"
+        f"⚙️ Daily limit per user: `{daily_limit}`\n"
+        f"🔢 Tokens per request: `{like_tokens}`\n"
+        f"🤖 Bot status: `{bot_status.upper()}`\n"
+        f"🔒 Mode: `{bot_mode.upper()}`\n\n"
+        f"🏆 *TOP USERS TODAY:*\n"
+    )
+    for i, (uid, cnt) in enumerate(top_users, 1):
+        msg += f"{i}. UID `{uid}` — `{cnt}` likes\n"
+    msg += f"\n🔥 Credits: @DCFsolayman"
+    await reply(update, msg)
+
+
+# ============ WELCOME/GOODBYE COMMANDS ============
+async def setwelcome_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set custom welcome message (admin only): /setwelcome <text>"""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    if not context.args:
+        await reply(update, f"📝 Current welcome: *{welcome_msg}*\nUsage: `/setwelcome <your text>`")
+        return
+    global welcome_msg
+    welcome_msg = " ".join(context.args)
+    save_all()
+    await reply(update, f"✅ Welcome message updated!\n📝 *{welcome_msg}*")
+
+
+async def setgoodbye_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set custom goodbye message (admin only): /setgoodbye <text>"""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    if not context.args:
+        await reply(update, f"📝 Current goodbye: *{goodbye_msg}*\nUsage: `/setgoodbye <your text>`")
+        return
+    global goodbye_msg
+    goodbye_msg = " ".join(context.args)
+    save_all()
+    await reply(update, f"✅ Goodbye message updated!\n📝 *{goodbye_msg}*")
+
+
+# ============ LANGUAGE COMMAND ============
+async def setlang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set your language: /setlang en or /setlang bn"""
+    user_id = update.effective_user.id
+    if not context.args or context.args[0].lower() not in ("en", "bn"):
+        await reply(update, "🌐 Choose language: `/setlang en` or `/setlang bn`")
+        return
+    user_lang[user_id] = context.args[0].lower()
+    save_all()
+    lang_name = "English" if user_lang[user_id] == "en" else "Bangla"
+    await reply(update, f"✅ Language set to: *{lang_name}*")
+
+
+# ============ LEADERBOARD COMMAND ============
+async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View top users by likes today: /leaderboard"""
+    t = today_str()
+    if t not in daily_stats or daily_stats[t]['total'] == 0:
+        await reply(update, f"📊 No like activity recorded for today ({t}).")
+        return
+    top_users = sorted(daily_stats[t]['users'].items(), key=lambda x: x[1], reverse=True)[:10]
+    msg = f"🏆 *LEADERBOARD — {t}*\n\n"
+    for i, (uid, cnt) in enumerate(top_users, 1):
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🔹"
+        msg += f"{medal} #{i} UID `{uid}` — `{cnt}` likes\n"
+    msg += f"\n🔥 Total likes today: `{daily_stats[t]['total']}`\n👑 Credits: @DCFsolayman"
     await reply(update, msg)
 
 
@@ -3965,6 +4175,13 @@ def main():
         app.add_handler(CommandHandler("removevip", removevip_cmd))
         app.add_handler(CommandHandler("vipstatus", vipstatus_cmd))
         app.add_handler(CommandHandler("vipusers", vipusers_cmd))
+        # New feature commands
+        app.add_handler(CommandHandler("likehistory", likehistory_cmd))
+        app.add_handler(CommandHandler("dailyreport", dailyreport_cmd))
+        app.add_handler(CommandHandler("setwelcome", setwelcome_cmd))
+        app.add_handler(CommandHandler("setgoodbye", setgoodbye_cmd))
+        app.add_handler(CommandHandler("setlang", setlang_cmd))
+        app.add_handler(CommandHandler("leaderboard", leaderboard_cmd))
         # Auto-like announcement commands
         app.add_handler(CommandHandler("setautolikechannel", setautolikechannel_cmd))
         app.add_handler(CommandHandler("setautolikegroup", setautolikegroup_cmd))

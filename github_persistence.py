@@ -48,6 +48,8 @@ PERSISTED_FILES: Dict[str, str] = {
     "broadcast": "broadcast_list.json",
     "likes": "successful_likes.json",
     "groups": "group_management.db",
+    "lang": "user_lang.json",
+    "history": "like_history.json",
 }
 
 DEFAULT_REPO = "solayman357/ff-likes-bot"
