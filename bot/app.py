@@ -40,6 +40,7 @@ DATA_FILES = {
     'allowed': 'allowed_groups.json',
     'stats': 'daily_stats.json',
     'users': 'user_limits.json',
+    'vip': 'vip_users.json',
     'config': 'bot_config.json'
 }
 
@@ -1193,6 +1194,7 @@ bot_mode = "public"
 allowed_groups = {}
 daily_stats = {}
 user_limits = {}
+vip_users = set()
 daily_limit = 2
 like_tokens = 240
 force_join = False
@@ -1225,6 +1227,7 @@ def load_data():
     allowed_groups = _read_json(DATA_FILES['allowed'], {})
     daily_stats = _read_json(DATA_FILES['stats'], {})
     user_limits = _read_json(DATA_FILES['users'], {})
+    vip_users = set(_read_json(DATA_FILES['vip'], []))
     cfg = _read_json(DATA_FILES['config'], None)
 
     # Apply saved values WITHOUT resetting anything to defaults.
@@ -1302,6 +1305,7 @@ def save_all():
         with open(DATA_FILES['allowed'], 'w') as f: json.dump(allowed_groups, f, indent=2)
         with open(DATA_FILES['stats'], 'w') as f: json.dump(daily_stats, f, indent=2)
         with open(DATA_FILES['users'], 'w') as f: json.dump(user_limits, f, indent=2)
+        with open(DATA_FILES['vip'], 'w') as f: json.dump(sorted(list(vip_users)), f, indent=2)
         with open(DATA_FILES['config'], 'w') as f:
             json.dump({
                 'status': bot_status,
@@ -1477,10 +1481,11 @@ async def force_join_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 def is_admin(uid): return uid in ADMIN_IDS
+def is_vip(uid): return uid in vip_users
 def today_str(): return str(date.today())
 
 def can_user_like(uid):
-    if is_admin(uid):
+    if is_admin(uid) or is_vip(uid):
         return True
     t = today_str()
     suid = str(uid)
@@ -1490,7 +1495,7 @@ def can_user_like(uid):
     return user_limits[suid]['count'] < daily_limit
 
 def update_user_like(uid):
-    if is_admin(uid):
+    if is_admin(uid) or is_vip(uid):
         return
     t = today_str()
     suid = str(uid)
@@ -1551,8 +1556,8 @@ async def reset_midnight(context: ContextTypes.DEFAULT_TYPE):
 async def block_non_admin_private(update: Update) -> bool:
     chat_type = update.effective_chat.type
     user_id = update.effective_user.id
-    if chat_type == "private" and not is_admin(user_id):
-        await update.message.reply_text("🚫 *Bot works only in groups!*\n(Admins can use in private)")
+    if chat_type == "private" and not is_admin(user_id) and not is_vip(user_id):
+        await update.message.reply_text("🚫 *Bot works only in groups!*\n(Admins and VIP users can use in private)")
         return True
     return False
 
@@ -1658,6 +1663,9 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if is_admin(uid):
         await reply(update, "👑 *Admin Account*\n🔥 *Unlimited likes* – No daily limit.")
+        return
+    if is_vip(uid):
+        await reply(update, "👑 *VIP Account*\n🔥 *Unlimited likes* – No daily limit.\n💬 Private chat access enabled.")
         return
     t = today_str()
     suid = str(uid)
@@ -2920,6 +2928,59 @@ async def set_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply(update, f"✅ *Daily limit set to `{daily_limit}` likes per user*")
 
 
+# ============ VIP USER COMMANDS ============
+async def addvip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a VIP user (unlimited likes, private access): /addvip <user_id>"""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    if len(context.args) != 1 or not context.args[0].isdigit():
+        await reply(update, "❌ Usage: `/addvip <user_id>`\nExample: `/addvip 7176002628`")
+        return
+    uid = int(context.args[0])
+    vip_users.add(uid)
+    save_all()
+    await reply(update, f"✅ User `{uid}` added to VIP list. Unlimited likes enabled.")
+
+
+async def removevip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a VIP user: /removevip <user_id>"""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    if len(context.args) != 1 or not context.args[0].isdigit():
+        await reply(update, "❌ Usage: `/removevip <user_id>`")
+        return
+    uid = int(context.args[0])
+    vip_users.discard(uid)
+    save_all()
+    await reply(update, f"✅ User `{uid}` removed from VIP list.")
+
+
+async def vipstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Check your VIP status: /vipstatus"""
+    uid = update.effective_user.id
+    if is_vip(uid):
+        await reply(update, "👑 *VIP Status: ACTIVE*\n🔥 Unlimited likes – No daily limit.\n💬 Private chat access enabled.")
+    else:
+        await reply(update, f"📋 *VIP Status: INACTIVE*\nYou are not a VIP user. Daily limit: `{daily_limit}` likes.\nAsk the bot admin to add you with `/addvip {uid}`.")
+
+
+async def vipusers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all VIP users (admin only): /vipusers"""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+    if not vip_users:
+        await reply(update, "📭 No VIP users found.")
+        return
+    msg = "👑 *VIP USERS*\n\n"
+    for i, uid in enumerate(sorted(vip_users), 1):
+        msg += f"{i}. `{uid}`\n"
+    msg += f"\nTotal: {len(vip_users)} VIP user(s)"
+    await reply(update, msg)
+
+
 # ============ LIKE MODE COMMANDS ============
 async def set_api_100(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """100-token mode (~100-110 likes per request)."""
@@ -3823,6 +3884,11 @@ def main():
         app.add_handler(CommandHandler("setprivate", set_private))
         app.add_handler(CommandHandler("setpublic", set_public))
         app.add_handler(CommandHandler("setlimit", set_limit))
+        # VIP user commands
+        app.add_handler(CommandHandler("addvip", addvip_cmd))
+        app.add_handler(CommandHandler("removevip", removevip_cmd))
+        app.add_handler(CommandHandler("vipstatus", vipstatus_cmd))
+        app.add_handler(CommandHandler("vipusers", vipusers_cmd))
         app.add_handler(CommandHandler("setapi100", set_api_100))
         app.add_handler(CommandHandler("setapi", set_api))
         app.add_handler(CommandHandler("setapimax", set_api_max))
