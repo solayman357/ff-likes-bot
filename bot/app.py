@@ -3160,13 +3160,13 @@ async def dailyreport_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ============ WELCOME/GOODBYE COMMANDS ============
 async def setwelcome_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set custom welcome message (admin only): /setwelcome <text>"""
+    global welcome_msg
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
     if not context.args:
         await reply(update, f"📝 Current welcome: *{welcome_msg}*\nUsage: `/setwelcome <your text>`")
         return
-    global welcome_msg
     welcome_msg = " ".join(context.args)
     save_all()
     await reply(update, f"✅ Welcome message updated!\n📝 *{welcome_msg}*")
@@ -3174,13 +3174,13 @@ async def setwelcome_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def setgoodbye_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set custom goodbye message (admin only): /setgoodbye <text>"""
+    global goodbye_msg
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
     if not context.args:
         await reply(update, f"📝 Current goodbye: *{goodbye_msg}*\nUsage: `/setgoodbye <your text>`")
         return
-    global goodbye_msg
     goodbye_msg = " ".join(context.args)
     save_all()
     await reply(update, f"✅ Goodbye message updated!\n📝 *{goodbye_msg}*")
