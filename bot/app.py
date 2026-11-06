@@ -1859,23 +1859,30 @@ async def _like_cmd_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for fwd_channel_id in forward_channel_ids:
             if not fwd_channel_id:
                 continue
-            try:
-                await context.bot.forward_message(
-                    chat_id=fwd_channel_id,
-                    from_chat_id=sent_msg.chat.id,
-                    message_id=sent_msg.message_id,
-                )
-                print(f"✅ Forwarded successful like to {fwd_channel_id}", flush=True)
-            except Exception as e:
-                # Native forward can fail (e.g. protected content / permissions).
-                # Fall back to posting the exact same text so it never goes missing.
-                print(f"⚠️ Forward failed to {fwd_channel_id}: {e} - trying direct copy", flush=True)
+            sent_ok = False
+            for attempt in range(2):
+                try:
+                    await context.bot.forward_message(
+                        chat_id=fwd_channel_id,
+                        from_chat_id=sent_msg.chat.id,
+                        message_id=sent_msg.message_id,
+                    )
+                    print(f"✅ Forwarded successful like to {fwd_channel_id}", flush=True)
+                    sent_ok = True
+                    break
+                except Exception as e:
+                    print(f"⚠️ Forward attempt {attempt + 1} failed for {fwd_channel_id}: {e}", flush=True)
+                    if attempt == 0:
+                        await asyncio.sleep(2)
+            if not sent_ok:
+                # Fall back to direct copy if native forward keeps failing
                 try:
                     await context.bot.send_message(chat_id=fwd_channel_id, text=result)
                     print(f"✅ Fallback copy sent to {fwd_channel_id}", flush=True)
                 except Exception as e2:
-                    # Log the error but never break the successful like operation.
                     print(f"❌ Both forward and fallback failed for {fwd_channel_id}: {e2}", flush=True)
+            # Small delay between channels to avoid rate limits
+            await asyncio.sleep(1)
 
 # ============ JWT TOKEN UPLOAD HANDLER ============
 # Broadcast list file
