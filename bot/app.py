@@ -1215,7 +1215,7 @@ def _read_json(path, default):
 
 def load_data():
     """Load persisted data. GitHub is the source of truth when enabled."""
-    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channels, force_join_links, forward_channel_ids, forward_channel_links, forward_channel_id, forward_channel_link
+    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channels, force_join_links, forward_channel_ids, forward_channel_links, forward_channel_id, forward_channel_link, AUTO_LIKE_CHANNEL_ID, AUTO_LIKE_GROUP_ID
 
     if github_persistence:
         try:
@@ -1229,6 +1229,12 @@ def load_data():
     user_limits = _read_json(DATA_FILES['users'], {})
     vip_users = set(_read_json(DATA_FILES['vip'], []))
     cfg = _read_json(DATA_FILES['config'], None)
+    AUTO_LIKE_CHANNEL_ID = cfg.get('auto_like_channel_id') if isinstance(cfg, dict) else None
+    AUTO_LIKE_GROUP_ID = cfg.get('auto_like_group_id') if isinstance(cfg, dict) else None
+    if AUTO_LIKE_CHANNEL_ID:
+        print(f"📺 Auto-like announcement channel loaded: {AUTO_LIKE_CHANNEL_ID}", flush=True)
+    if AUTO_LIKE_GROUP_ID:
+        print(f"👥 Auto-like announcement group loaded: {AUTO_LIKE_GROUP_ID}", flush=True)
 
     # Apply saved values WITHOUT resetting anything to defaults.
     if isinstance(cfg, dict):
@@ -1320,6 +1326,8 @@ def save_all():
                 # Backward compatibility: also save single value
                 'forward_channel_id': forward_channel_ids[0] if forward_channel_ids else '',
                 'forward_channel_link': forward_channel_links.get(forward_channel_ids[0], '') if forward_channel_ids else '',
+                'auto_like_channel_id': AUTO_LIKE_CHANNEL_ID,
+                'auto_like_group_id': AUTO_LIKE_GROUP_ID,
             }, f, indent=2)
         # Save broadcast list
         try:
