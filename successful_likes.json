@@ -260,6 +260,15 @@
       "after": 36127,
       "requested_by": 7447596395,
       "timestamp": "2026-11-06"
+    },
+    {
+      "target_uid": "1245205414",
+      "region": "BD",
+      "likes_given": 5,
+      "before": 18940,
+      "after": 18945,
+      "requested_by": 8120926973,
+      "timestamp": "2026-11-06"
     }
   ]
 }
