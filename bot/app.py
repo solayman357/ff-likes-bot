@@ -4018,8 +4018,79 @@ def main():
 
         # Start polling — run_polling() manages its own event loop internally,
         # including bot identity check (get_me) and webhook deletion.
+        # If polling crashes (network error, etc.), retry instead of dying.
         print("🚀 Starting polling...", flush=True)
-        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        while True:
+            try:
+                app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+            except Exception as e:
+                print(f"❌ Polling crashed: {e} — retrying in 10s", flush=True)
+                import traceback
+                traceback.print_exc()
+                time.sleep(10)
+                # Rebuild the application in case the old one is in a bad state
+                try:
+                    request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
+                    app = Application.builder().token(BOT_TOKEN).request(request).build()
+                    job_queue = app.job_queue
+                    if job_queue:
+                        job_queue.run_daily(reset_midnight, time=datetime_time(hour=0, minute=0, second=0), days=tuple(range(7)))
+                        job_queue.run_repeating(auto_like_scheduler_tick, interval=60, first=10)
+                    app.add_handler(CommandHandler("start", start))
+                    app.add_handler(CommandHandler("help", help_cmd))
+                    app.add_handler(CommandHandler("info", info_cmd))
+                    app.add_handler(CommandHandler("like", like_cmd))
+                    app.add_handler(CommandHandler("allow", allow_group))
+                    app.add_handler(CommandHandler("off", off_cmd))
+                    app.add_handler(CommandHandler("on", on_cmd))
+                    app.add_handler(CommandHandler("stats", stats_cmd))
+                    app.add_handler(CommandHandler("setprivate", set_private))
+                    app.add_handler(CommandHandler("setpublic", set_public))
+                    app.add_handler(CommandHandler("setlimit", set_limit))
+                    app.add_handler(CommandHandler("addvip", addvip_cmd))
+                    app.add_handler(CommandHandler("removevip", removevip_cmd))
+                    app.add_handler(CommandHandler("vipstatus", vipstatus_cmd))
+                    app.add_handler(CommandHandler("vipusers", vipusers_cmd))
+                    app.add_handler(CommandHandler("setautolikechannel", setautolikechannel_cmd))
+                    app.add_handler(CommandHandler("setautolikegroup", setautolikegroup_cmd))
+                    app.add_handler(CommandHandler("autolikeannouncestatus", autolikeannouncestatus_cmd))
+                    app.add_handler(CommandHandler("setapi100", set_api_100))
+                    app.add_handler(CommandHandler("setapi", set_api))
+                    app.add_handler(CommandHandler("setapimax", set_api_max))
+                    app.add_handler(CommandHandler("maxff", set_api_max))
+                    app.add_handler(CommandHandler("setforcejoin", setforcejoin))
+                    app.add_handler(CommandHandler("addforcejoin", addforcejoin))
+                    app.add_handler(CommandHandler("removeforcejoin", removeforcejoin))
+                    app.add_handler(CommandHandler("forcejoinlist", forcejoinlist))
+                    app.add_handler(CommandHandler("forcejoinstatus", forcejoinstatus))
+                    app.add_handler(CommandHandler("forcejoinon", forcejoinon))
+                    app.add_handler(CommandHandler("forcejoinoff", forcejoinoff))
+                    app.add_handler(CommandHandler("broadcast", broadcast_cmd))
+                    app.add_handler(CommandHandler("registergroup", register_group_cmd))
+                    app.add_handler(CommandHandler("apistatus", apistatus_cmd))
+                    app.add_handler(CommandHandler("groups", groups_cmd))
+                    app.add_handler(CommandHandler("allowgroup", allowgroup_cmd))
+                    app.add_handler(CommandHandler("blockgroup", blockgroup_cmd))
+                    app.add_handler(CommandHandler("syncgroups", syncgroups_cmd))
+                    app.add_handler(CommandHandler("backup", backup_cmd))
+                    app.add_handler(CommandHandler("backupstatus", backupstatus_cmd))
+                    app.add_handler(CommandHandler("autolike", autolike_cmd))
+                    app.add_handler(CommandHandler("myautolike", myautolike_cmd))
+                    app.add_handler(CommandHandler("autolikeinfo", autolikeinfo_cmd))
+                    app.add_handler(CommandHandler("stopautolike", stopautolike_cmd))
+                    app.add_handler(CommandHandler("resumeautolike", resumeautolike_cmd))
+                    app.add_handler(CommandHandler("autolikestatus", autolikestatus_cmd))
+                    app.add_handler(CommandHandler("autolikelist", autolikelist_cmd))
+                    app.add_handler(CallbackQueryHandler(group_callback_handler, pattern="^(group_allow|group_block|group_details|groups_page)_"))
+                    app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
+                    app.add_handler(CallbackQueryHandler(forcejoin_noop_callback, pattern="^forcejoin_noop$"))
+                    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+                    app.add_handler(ChatMemberHandler(my_chat_member_handler, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))
+                    app.add_error_handler(error_handler)
+                    set_app_bot(app)
+                except Exception as rebuild_e:
+                    print(f"❌ Failed to rebuild app: {rebuild_e}", flush=True)
+                    time.sleep(10)
     except Exception as e:
         print(f"❌ Bot setup failed: {e}", flush=True)
         import traceback
