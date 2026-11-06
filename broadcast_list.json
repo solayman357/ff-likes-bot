@@ -1,24 +1,4 @@
 {
-  "chats": {
-    "-1004374850616": {
-      "chat_id": -1004374850616,
-      "chat_type": "supergroup",
-      "title": "Likesㅤ booster",
-      "added_at": "2026-11-06"
-    },
-    "-1003922567550": {
-      "chat_id": -1003922567550,
-      "chat_type": "supergroup",
-      "title": "FREE FIRE FREE LIKES",
-      "added_at": "2026-11-06"
-    }
-  },
-  "users": {
-    "7677485163": {
-      "user_id": 7677485163,
-      "username": "tyubhossen",
-      "first_name": "Tyub",
-      "added_at": "2026-11-06"
-    }
-  }
+  "chats": {},
+  "users": {}
 }
