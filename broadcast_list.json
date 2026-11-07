@@ -1,24 +1,4 @@
 {
-  "chats": {
-    "-1003910729190": {
-      "chat_id": -1003910729190,
-      "chat_type": "supergroup",
-      "title": "𝐒𝐀𝐌𝐈𝐑 𝕏 𝐋𝐈𝐊𝐄",
-      "added_at": "2026-11-06"
-    },
-    "-1003922567550": {
-      "chat_id": -1003922567550,
-      "chat_type": "supergroup",
-      "title": "FREE FIRE FREE LIKES",
-      "added_at": "2026-11-07"
-    }
-  },
-  "users": {
-    "7176002628": {
-      "user_id": 7176002628,
-      "username": "CATS_AI_solayman",
-      "first_name": "SOoLAyMAn",
-      "added_at": "2026-11-07"
-    }
-  }
+  "chats": {},
+  "users": {}
 }
