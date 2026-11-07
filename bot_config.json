@@ -3,11 +3,19 @@
   "mode": "public",
   "limit": 2,
   "like_tokens": 399,
-  "force_join": false,
-  "force_join_channels": [],
-  "force_join_links": {},
-  "force_join_group_titles": {},
-  "force_join_group_usernames": {},
+  "force_join": true,
+  "force_join_channels": [
+    "-1004374850616"
+  ],
+  "force_join_links": {
+    "-1004374850616": "https://t.me/+WCGFhzf132QxNDg1"
+  },
+  "force_join_group_titles": {
+    "-1004374850616": "Likes\u3164 booster"
+  },
+  "force_join_group_usernames": {
+    "-1004374850616": "@GT_like_boost"
+  },
   "forward_channel_ids": [
     "@autolikespro",
     "@FFAUTOLIKESPRO1"
