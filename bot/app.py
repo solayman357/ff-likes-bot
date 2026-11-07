@@ -1456,11 +1456,8 @@ def build_force_join_keyboard() -> InlineKeyboardMarkup:
     keyboard = []
     for i, gid in enumerate(force_join_channels, start=1):
         link = (force_join_links.get(gid) or "").strip()
-        title = force_join_group_titles.get(gid) or gid
-        username = force_join_group_usernames.get(gid)
-        display = f"{title} ({username})" if username else title
         if link:
-            keyboard.append([InlineKeyboardButton(f"📢 Join Group {i} — {display[:25]}", url=link)])
+            keyboard.append([InlineKeyboardButton(f"📢 Join Group {i}", url=link)])
         else:
             keyboard.append([InlineKeyboardButton(f"⚠️ Group {i} (no link)", callback_data="forcejoin_noop")])
     keyboard.append([InlineKeyboardButton("✅ I'VE JOINED - VERIFY", callback_data="verify_join")])
@@ -1500,9 +1497,9 @@ async def safe_edit_message(target, text: str, reply_markup=None, parse_mode: st
 async def is_user_member_single(context: ContextTypes.DEFAULT_TYPE, user_id: int, channel: str) -> bool:
     """Check membership in one channel. Returns True only if truly joined.
 
-    Tries the stored channel identifier first. If that fails (e.g. placeholder
-    name like "channel-1"), falls back to extracting the username from the
-    stored invite link.
+    Tries the stored channel identifier first. If that fails (e.g. invite hash
+    that can't be used with get_chat_member), resolves the invite link to a real
+    chat ID via get_chat and retries.
     If get_chat_member fails for any reason (bot not admin, channel deleted,
     etc.), we treat the user as NOT joined to maintain security.
     """
@@ -1515,23 +1512,30 @@ async def is_user_member_single(context: ContextTypes.DEFAULT_TYPE, user_id: int
         return joined
     except BadRequest as e:
         msg = str(e).lower()
-        # If chat not found, try extracting from the link
-        if "chat not found" in msg:
+        # If chat not found or bad request, try resolving via invite link
+        if "chat not found" in msg or "bad request" in msg:
             link = force_join_links.get(str(channel), "") or ""
-            extracted = _extract_username_from_link(link)
-            if extracted and extracted != channel:
-                print(f"🔄 Falling back to link-extracted identifier '{extracted}' for '{channel}'", flush=True)
+            if link and link.startswith("https://t.me/"):
                 try:
-                    member = await context.bot.get_chat_member(chat_id=extracted, user_id=user_id)
+                    # Resolve invite link to real chat ID via get_chat
+                    chat_info = await context.bot.get_chat(chat_id=link)
+                    real_chat_id = str(chat_info.id)
+                    print(f"🔄 Resolved invite link '{link}' to chat ID '{real_chat_id}'", flush=True)
+                    # Update stored channel ID to the real chat ID
+                    if channel in force_join_channels:
+                        idx = force_join_channels.index(channel)
+                        force_join_channels[idx] = real_chat_id
+                        force_join_links[real_chat_id] = force_join_links.pop(channel)
+                        force_join_group_titles[real_chat_id] = force_join_group_titles.pop(channel, real_chat_id)
+                        if channel in force_join_group_usernames:
+                            force_join_group_usernames[real_chat_id] = force_join_group_usernames.pop(channel)
+                    member = await context.bot.get_chat_member(chat_id=real_chat_id, user_id=user_id)
                     joined = _member_is_joined(member)
                     if not joined:
-                        print(f"🔍 getChatMember '{extracted}' user={user_id}: status={getattr(member, 'status', '?')} → NOT joined", flush=True)
+                        print(f"🔍 getChatMember '{real_chat_id}' user={user_id}: status={getattr(member, 'status', '?')} → NOT joined", flush=True)
                     return joined
-                except BadRequest as e2:
-                    print(f"⚠️ getChatMember '{extracted}' failed: {e2}", flush=True)
-                    return False  # Can't verify, treat as NOT joined
                 except Exception as e2:
-                    print(f"⚠️ getChatMember '{extracted}' failed: {type(e2).__name__}: {e2}", flush=True)
+                    print(f"⚠️ Could not resolve invite link '{link}': {type(e2).__name__}: {e2}", flush=True)
                     return False  # Can't verify, treat as NOT joined
         print(f"⚠️ getChatMember '{channel}' failed: {e}", flush=True)
         return False  # Can't verify, treat as NOT joined
@@ -3665,28 +3669,39 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Use existing normalizer: @username, username, https://t.me/USERNAME, +INVITEHASH, etc.
         gid = _normalize_channel(raw)
 
-        # If it's an invite hash (+...), it can't be used with get_chat_member.
-        # Store it as the invite link instead and try to resolve the chat.
+        # If it's an invite hash (+...), resolve to real chat ID via get_chat
+        # so that get_chat_member works later.
         is_invite_hash = gid.startswith("+") or gid.startswith("joinchat/")
+        custom_link = None
         if is_invite_hash:
-            # The raw value is an invite link/hash, not a chat ID.
-            # Store the hash as the ID and the full URL as the invite link.
-            custom_link = raw if raw.startswith(("http://", "https://", "tg://", "t.me/")) else None
-            if not custom_link and gid.startswith("+"):
+            # Build the full invite link URL
+            if gid.startswith("+"):
                 custom_link = f"https://t.me/{gid}"
-            # Keep gid as the invite hash (e.g., +SoEwO6_27x05Y2M1)
-            # get_chat_member may fail for invite hashes, but is_user_member_single
-            # handles that gracefully by treating the user as joined.
+            else:
+                custom_link = raw if raw.startswith(("http://", "https://", "tg://", "t.me/")) else f"https://t.me/{gid}"
+
+            # Try to resolve invite link to real chat ID
+            try:
+                chat_info = await context.bot.get_chat(chat_id=custom_link)
+                gid = str(chat_info.id)  # Use real numeric chat ID
+                chat_title = getattr(chat_info, "title", None) or gid
+                chat_username = getattr(chat_info, "username", None)
+                if chat_username and not chat_username.startswith("@"):
+                    chat_username = "@" + chat_username
+                print(f"🔄 Resolved invite link '{custom_link}' to chat ID '{gid}'", flush=True)
+            except Exception as e:
+                print(f"⚠️ Could not resolve invite link '{custom_link}': {e}", flush=True)
+                # Keep gid as the invite hash; verification may fail but we store it anyway
         else:
             custom_link = None
             if len(context.args) > 1:
                 custom_link = context.args[1].strip()
 
-        # Try to fetch chat info for title/username
+        # Try to fetch chat info for title/username (only if we have a real chat ID)
         chat_title = gid or raw
         chat_username = None
 
-        if gid:
+        if gid and not is_invite_hash:
             try:
                 chat_info = await context.bot.get_chat(gid)
                 chat_title = getattr(chat_info, "title", None) or gid
@@ -3700,8 +3715,11 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_username = raw
                 elif raw.isalnum() or "_" in raw:
                     chat_username = "@" + raw
+        elif gid and is_invite_hash:
+            # We already tried to get chat info via invite link above
+            pass
         else:
-            # For invite hashes, we can't get chat info via get_chat
+            # For invite hashes that couldn't be resolved
             chat_title = raw
             chat_username = None
 
@@ -3712,7 +3730,7 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not invite_link and is_invite_hash and custom_link:
             invite_link = custom_link
 
-        # Use the normalized gid as the ID
+        # Use the resolved gid as the ID
         final_gid = gid
 
         # Check for duplicate
