@@ -404,6 +404,15 @@
       "after": 6451,
       "requested_by": 7176002628,
       "timestamp": "2026-11-07"
+    },
+    {
+      "target_uid": "17748275104",
+      "region": "TH",
+      "likes_given": 47,
+      "before": 32,
+      "after": 79,
+      "requested_by": 7176002628,
+      "timestamp": "2026-11-07"
     }
   ]
 }
