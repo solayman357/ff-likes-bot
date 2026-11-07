@@ -1263,6 +1263,7 @@ force_join_channels = []  # List of group chat ID strings: ["-1001234567890", ..
 force_join_links = {}  # Dict: group_id → invite_link
 force_join_group_titles = {}  # Dict: group_id → group title
 force_join_group_usernames = {}  # Dict: group_id → @username
+_ff_migration_done = False  # Flag to track one-time migration of invite hash IDs
 welcome_msg = "👋 Welcome to FF LIKES PRO BOT! Use /help to see all commands."
 goodbye_msg = "👋 Goodbye! Come back soon to FF LIKES PRO BOT."
 
@@ -1560,6 +1561,88 @@ async def is_user_member(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bo
     return len(await get_missing_channels(context, user_id)) == 0
 
 
+async def _migrate_force_join_ids(context: ContextTypes.DEFAULT_TYPE):
+    """Resolve any invite hash IDs in force_join_channels to real chat IDs.
+
+    Invite hashes (e.g. +SoEwO6_27x05Y2M1) cannot be used with get_chat_member.
+    This function tries to resolve them via get_chat(chat_id=invite_link).
+    """
+    global force_join_channels, force_join_links, force_join_group_titles, force_join_group_usernames
+    global _ff_migration_done
+
+    if _ff_migration_done:
+        return
+
+    _ff_migration_done = True
+
+    if not force_join_channels:
+        return
+
+    new_channels = []
+    new_links = {}
+    new_titles = {}
+    new_usernames = {}
+    migrated = False
+
+    for gid in force_join_channels:
+        link = force_join_links.get(gid, "") or ""
+
+        # If gid is already a real chat ID (starts with - or @), keep as-is
+        if gid.startswith("-") or gid.startswith("@"):
+            new_channels.append(gid)
+            if link:
+                new_links[gid] = link
+            if gid in force_join_group_titles:
+                new_titles[gid] = force_join_group_titles[gid]
+            if gid in force_join_group_usernames:
+                new_usernames[gid] = force_join_group_usernames[gid]
+            continue
+
+        # gid is an invite hash (e.g. +SoEwO6_27x05Y2M1) - try to resolve
+        if gid.startswith("+"):
+            invite_link = f"https://t.me/{gid}"
+        else:
+            invite_link = link if link else f"https://t.me/{gid}"
+
+        try:
+            chat_info = await context.bot.get_chat(chat_id=invite_link)
+            real_gid = str(chat_info.id)
+            real_title = getattr(chat_info, "title", None) or gid
+            real_username = getattr(chat_info, "username", None)
+            if real_username and not real_username.startswith("@"):
+                real_username = "@" + real_username
+
+            print(f"🔄 Resolved invite hash '{gid}' to chat ID '{real_gid}'", flush=True)
+
+            new_channels.append(real_gid)
+            new_links[real_gid] = invite_link
+            new_titles[real_gid] = real_title
+            new_usernames[real_gid] = real_username
+            migrated = True
+        except Exception as e:
+            print(f"⚠️ Could not resolve invite hash '{gid}': {e}", flush=True)
+            # Keep as-is; verification will fail but at least we tried
+            new_channels.append(gid)
+            if link:
+                new_links[gid] = link
+            if gid in force_join_group_titles:
+                new_titles[gid] = force_join_group_titles[gid]
+            if gid in force_join_group_usernames:
+                new_usernames[gid] = force_join_group_usernames[gid]
+
+    if migrated:
+        force_join_channels.clear()
+        force_join_channels.extend(new_channels)
+        force_join_links.clear()
+        force_join_links.update(new_links)
+        force_join_group_titles.clear()
+        force_join_group_titles.update(new_titles)
+        force_join_group_usernames.clear()
+        force_join_group_usernames.update(new_usernames)
+        save_all()
+        print(f"✅ Force-join migration complete: {len(force_join_channels)} group(s) resolved", flush=True)
+
+
 async def force_join_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Block access until the user has joined ALL required channels."""
     if not force_join or not force_join_channels:
@@ -1569,6 +1652,9 @@ async def force_join_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return True
     if is_admin(user.id):
         return True
+
+    # Run one-time migration of invite hash IDs to real chat IDs
+    await _migrate_force_join_ids(context)
 
     missing = await get_missing_channels(context, user.id)
     if not missing:
@@ -3691,7 +3777,16 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print(f"🔄 Resolved invite link '{custom_link}' to chat ID '{gid}'", flush=True)
             except Exception as e:
                 print(f"⚠️ Could not resolve invite link '{custom_link}': {e}", flush=True)
-                # Keep gid as the invite hash; verification may fail but we store it anyway
+                await reply(
+                    update,
+                    "❌ *Could Not Resolve Channel*\n\n"
+                    f"🆔 Input: `{raw}`\n"
+                    f"🔗 Link: `{custom_link}`\n\n"
+                    "Please make the bot an **administrator** in this channel/group first, "
+                    f"then try again.\n\n"
+                    "The bot needs admin rights to verify membership.",
+                )
+                return
         else:
             custom_link = None
             if len(context.args) > 1:
@@ -3726,7 +3821,7 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Determine invite link
         invite_link = custom_link
         if not invite_link and chat_username:
-            invite_link = f"https://t.me/{chat_username.lstrip('@')}"
+            invite_link = f"https://t.me/{chat_username.lstrip("@")}"
         if not invite_link and is_invite_hash and custom_link:
             invite_link = custom_link
 
@@ -3766,7 +3861,7 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update,
             "❌ This command must be used inside a group/channel, "
             "or provide a username: `/addforcejointhisgroup @username`\n\n"
-            "The bot must be an administrator in that group/channel."
+            "The bot must be an administrator in that group/channel.",
         )
         return
 
@@ -3815,7 +3910,6 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔢 Total Required: `{len(force_join_channels)}`\n"
         f"🟢 Status: Enabled{note}"
     )
-
 
 async def setforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add the first/another required channel."""
