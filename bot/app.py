@@ -3451,20 +3451,26 @@ def _extract_username_from_link(link: str) -> str:
     # Already a username
     if link.startswith("@"):
         return link
+
+    # Parse t.me links FIRST (before isalnum check, since URLs may contain _)
+    if link.lower().startswith(("http://", "https://", "tg://")):
+        m = re.match(r"^https?://t\.me/(.+)$", link, re.IGNORECASE)
+        if m:
+            path = m.group(1)
+            if path.startswith("+"):
+                # Private invite link — keep as-is for the Join button
+                return path
+            if path.startswith("joinchat/"):
+                return path
+            return "@" + path
+        # Not a t.me link, return as-is
+        return link
+
+    # Bare username or invite hash
+    if link.startswith("+") or link.startswith("-"):
+        return link
     if link.isalnum() or "_" in link:
         return "@" + link
-
-    # Parse t.me links
-    m = re.match(r"^https?://t\.me/(.+)$", link, re.IGNORECASE)
-    if m:
-        path = m.group(1)
-        if path.startswith("+"):
-            # Private invite link — keep as-is for the Join button,
-            # but cannot be used with get_chat_member directly.
-            return path
-        if path.startswith("joinchat/"):
-            return path
-        return "@" + path
 
     return link
 
@@ -3472,50 +3478,110 @@ def _extract_username_from_link(link: str) -> str:
 def _migrate_force_join_channels():
     """Migrate existing force_join_channels to valid Telegram identifiers.
 
-    Old data may contain placeholder names like "channel-1", "channel-2"
-    instead of actual usernames. This function extracts the real username
-    from force_join_links (e.g. https://t.me/FFLIKESPRO2 -> @FFLIKESPRO2)
-    and updates force_join_channels accordingly.
+    Old data may contain:
+      - URLs like @https://t.me/FFAUTOLIKESPRO1 -> @FFAUTOLIKESPRO1
+      - URLs like https://t.me/FFAUTOLIKESPRO1 -> @FFAUTOLIKESPRO1
+      - Invite links stored as IDs like +HASH -> move to links
+      - Placeholder names
     """
-    global force_join_channels, force_join_links
+    global force_join_channels, force_join_links, force_join_group_titles, force_join_group_usernames
     migrated = False
     new_channels = []
     new_links = {}
+    new_titles = {}
+    new_usernames = {}
 
     for ch in force_join_channels:
         link = force_join_links.get(str(ch), "") or ""
-        # Try to extract username from the link if channel is not already a valid username/ID
-        extracted = _extract_username_from_link(link) if link else None
-        if extracted and extracted != ch:
-            print(f"🔄 Migrating force-join channel '{ch}' -> '{extracted}' from link", flush=True)
-            new_channels.append(extracted)
-            new_links[extracted] = link
+        title = force_join_group_titles.get(str(ch), ch)
+        username = force_join_group_usernames.get(str(ch), "")
+
+        # Normalize the channel ID using the existing normalizer
+        normalized = _normalize_channel(ch)
+
+        # If the normalized value is different from the current ID, migrate
+        if normalized and normalized != ch:
+            print(f"🔄 Migrating force-join ID '{ch}' -> '{normalized}'", flush=True)
+            new_channels.append(normalized)
+            new_links[normalized] = link
+            new_titles[normalized] = title
+            new_usernames[normalized] = username
             migrated = True
             continue
+
+        # If ch looks like a URL (@https://t.me/...), extract from it
+        if ch.startswith("@https://") or ch.startswith("https://"):
+            extracted = _normalize_channel(ch)
+            if extracted and extracted != ch:
+                print(f"🔄 Migrating force-join URL '{ch}' -> '{extracted}'", flush=True)
+                new_channels.append(extracted)
+                new_links[extracted] = link
+                new_titles[extracted] = title
+                new_usernames[extracted] = username
+                migrated = True
+                continue
 
         new_channels.append(ch)
         if link:
             new_links[str(ch)] = link
+        if title:
+            new_titles[str(ch)] = title
+        if username:
+            new_usernames[str(ch)] = username
 
     if migrated:
         force_join_channels = new_channels
         force_join_links = new_links
+        force_join_group_titles = new_titles
+        force_join_group_usernames = new_usernames
         save_all()
-        print(f"✅ Force-join channel migration complete: {len(force_join_channels)} channel(s)", flush=True)
+        print(f"✅ Force-join migration complete: {len(force_join_channels)} group(s)", flush=True)
 
 
 def _normalize_channel(value: str) -> str:
-    """Normalize a channel value: strip whitespace, extract username from links."""
+    """Normalize a channel value: strip whitespace, extract username from links.
+
+    Supports:
+      https://t.me/USERNAME      -> @USERNAME
+      https://t.me/+INVITEHASH   -> +INVITEHASH
+      https://t.me/joinchat/...  -> +joinchat_hash
+      @https://t.me/USERNAME     -> @USERNAME  (strip @, then parse URL)
+      @USERNAME                  -> @USERNAME
+      USERNAME                   -> @USERNAME
+      +INVITEHASH                -> +INVITEHASH
+      -1001234567890             -> -1001234567890
+    """
     value = (value or "").strip()
     if not value:
         return value
-    # If it's a t.me link, extract the username
+
+    # If value starts with @ followed by a URL, strip the @ and process as URL
+    if value.startswith("@http") or value.startswith("@tg://") or value.startswith("@t.me/"):
+        value = value[1:]  # Strip leading @
+
+    # If it's a t.me link, extract the username/invite hash
     if value.lower().startswith(("http://", "https://", "tg://")):
         extracted = _extract_username_from_link(value)
-        return extracted
+        if extracted:
+            return extracted
+        # Fallback: try to extract from URL manually
+        import re as _re
+        m = _re.match(r"^https?://t\.me/(.+)$", value, _re.IGNORECASE)
+        if m:
+            path = m.group(1)
+            if path.startswith("+"):
+                return path
+            return "@" + path
+        return value
+
+    # If it's already a username, invite hash, or chat ID, return as-is
+    if value.startswith("@") or value.startswith("+") or value.startswith("-"):
+        return value
+
     # If it's a bare username without @, add it
-    if not value.startswith("@") and not value.startswith("+") and not value.startswith("-"):
+    if value.isalnum() or "_" in value:
         return "@" + value
+
     return value
 
 
@@ -3563,54 +3629,70 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # If args provided, treat first arg as channel/group identifier
     if context.args:
         raw = context.args[0].strip()
-        # Normalize username/channel ID
-        gid = raw
-        if not gid.startswith("@") and not gid.startswith("-") and not gid.startswith("+"):
-            gid = "@" + gid
-        # If it's a numeric chat ID, keep as-is
-        if gid.lstrip("-").isdigit():
-            gid = gid
+        # Use existing normalizer: @username, username, https://t.me/USERNAME, +INVITEHASH, etc.
+        gid = _normalize_channel(raw)
 
-        # Custom invite link (optional second arg)
-        custom_link = None
-        if len(context.args) > 1:
-            custom_link = context.args[1].strip()
+        # If it's an invite hash (+...), it can't be used with get_chat_member.
+        # Store it as the invite link instead and try to resolve the chat.
+        is_invite_hash = gid.startswith("+") or gid.startswith("joinchat/")
+        if is_invite_hash:
+            # The raw value is an invite link/hash, not a chat ID.
+            # Store the hash as the ID and the full URL as the invite link.
+            custom_link = raw if raw.startswith(("http://", "https://", "tg://", "t.me/")) else None
+            if not custom_link and gid.startswith("+"):
+                custom_link = f"https://t.me/{gid}"
+            # Keep gid as the invite hash (e.g., +SoEwO6_27x05Y2M1)
+            # get_chat_member may fail for invite hashes, but is_user_member_single
+            # handles that gracefully by treating the user as joined.
+        else:
+            custom_link = None
+            if len(context.args) > 1:
+                custom_link = context.args[1].strip()
 
         # Try to fetch chat info for title/username
-        chat_title = gid
+        chat_title = gid or raw
         chat_username = None
-        try:
-            chat_info = await context.bot.get_chat(gid)
-            chat_title = getattr(chat_info, "title", None) or gid
-            chat_username = getattr(chat_info, "username", None)
-            if chat_username and not chat_username.startswith("@"):
-                chat_username = "@" + chat_username
-        except Exception as e:
-            print(f"⚠️ Could not fetch chat info for {gid}: {e}", flush=True)
+
+        if gid:
+            try:
+                chat_info = await context.bot.get_chat(gid)
+                chat_title = getattr(chat_info, "title", None) or gid
+                chat_username = getattr(chat_info, "username", None)
+                if chat_username and not chat_username.startswith("@"):
+                    chat_username = "@" + chat_username
+            except Exception as e:
+                print(f"⚠️ Could not fetch chat info for {gid}: {e}", flush=True)
+                # If get_chat fails, try extracting username from the raw input
+                if raw.startswith("@"):
+                    chat_username = raw
+                elif raw.isalnum() or "_" in raw:
+                    chat_username = "@" + raw
+        else:
+            # For invite hashes, we can't get chat info via get_chat
+            chat_title = raw
+            chat_username = None
 
         # Determine invite link
         invite_link = custom_link
         if not invite_link and chat_username:
             invite_link = f"https://t.me/{chat_username.lstrip('@')}"
-        if not invite_link:
-            # Try to create invite link (only works if bot is admin in the chat)
-            try:
-                new_link = await context.bot.create_chat_invite_link(gid)
-                invite_link = new_link.invite_link
-            except Exception:
-                invite_link = None
+        if not invite_link and is_invite_hash and custom_link:
+            invite_link = custom_link
+
+        # Use the normalized gid as the ID
+        final_gid = gid
 
         # Check for duplicate
-        if gid in force_join_channels:
-            force_join_links[gid] = invite_link or ""
-            force_join_group_titles[gid] = chat_title
-            force_join_group_usernames[gid] = chat_username or ""
+        if final_gid in force_join_channels:
+            force_join_links[final_gid] = invite_link or ""
+            force_join_group_titles[final_gid] = chat_title
+            force_join_group_usernames[final_gid] = chat_username or ""
             action = "updated"
         else:
-            force_join_channels.append(gid)
-            force_join_links[gid] = invite_link or ""
-            force_join_group_titles[gid] = chat_title
-            force_join_group_usernames[gid] = chat_username or ""
+            force_join_channels.append(final_gid)
+            force_join_links[final_gid] = invite_link or ""
+            force_join_group_titles[final_gid] = chat_title
+            force_join_group_usernames[final_gid] = chat_username or ""
             action = "added"
 
         force_join = True
@@ -3621,7 +3703,7 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update,
             f"✅ *FORCE JOIN {action.upper()}*\n\n"
             f"👥 Group/Channel: {chat_title}\n"
-            f"🆔 ID: `{gid}`\n"
+            f"🆔 ID: `{final_gid}`\n"
             f"🔢 Total Required: `{len(force_join_channels)}`\n"
             f"🟢 Status: Enabled{note}"
         )
