@@ -3,29 +3,11 @@
   "mode": "public",
   "limit": 2,
   "like_tokens": 399,
-  "force_join": true,
-  "force_join_channels": [
-    "+oFBBDKjm6Fw4ZGE9",
-    "+WCGFhzf132QxNDg1",
-    "+SoEwO6_27x05Y2M1",
-    "@FFAUTOLIKESPRO1"
-  ],
-  "force_join_links": {
-    "+oFBBDKjm6Fw4ZGE9": "https://t.me/+oFBBDKjm6Fw4ZGE9",
-    "+WCGFhzf132QxNDg1": "https://t.me/+WCGFhzf132QxNDg1",
-    "+SoEwO6_27x05Y2M1": "https://t.me/+SoEwO6_27x05Y2M1",
-    "@FFAUTOLIKESPRO1": "https://t.me/FFAUTOLIKESPRO1"
-  },
-  "force_join_group_titles": {
-    "+oFBBDKjm6Fw4ZGE9": "+oFBBDKjm6Fw4ZGE9",
-    "+WCGFhzf132QxNDg1": "+WCGFhzf132QxNDg1",
-    "+SoEwO6_27x05Y2M1": "@https://t.me/+SoEwO6_27x05Y2M1",
-    "@FFAUTOLIKESPRO1": "\ud80c\udda9\ud835\udc05\ud835\udc05 \ud835\udc00\ud835\udc14\ud835\udc13\ud835\udc0e\ud835\udc0b\ud835\udc08\ud835\udc0a\ud835\udc04\ud835\udc12 \ud835\udc0f\ud835\udc11\ud835\udc0e\ud80c\uddaa"
-  },
-  "force_join_group_usernames": {
-    "+SoEwO6_27x05Y2M1": "",
-    "@FFAUTOLIKESPRO1": "@FFAUTOLIKESPRO1"
-  },
+  "force_join": false,
+  "force_join_channels": [],
+  "force_join_links": {},
+  "force_join_group_titles": {},
+  "force_join_group_usernames": {},
   "forward_channel_ids": [
     "@autolikespro",
     "@FFAUTOLIKESPRO1"
