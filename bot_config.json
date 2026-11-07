@@ -8,13 +8,15 @@
     "@FFLIKESPRO2",
     "@autolikespro",
     "@FFAUTOLIKESPRO1",
-    "-1004374850616"
+    "-1004374850616",
+    "@group-4"
   ],
   "force_join_links": {
     "@FFLIKESPRO2": "https://t.me/FFLIKESPRO2",
     "@autolikespro": "https://t.me/autolikespro",
     "@FFAUTOLIKESPRO1": "https://t.me/FFAUTOLIKESPRO1",
-    "-1004374850616": ""
+    "-1004374850616": "",
+    "@group-4": "@https://t.me/GT_like_boost"
   },
   "forward_channel_ids": [
     "@autolikespro",
