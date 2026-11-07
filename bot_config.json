@@ -5,16 +5,20 @@
   "like_tokens": 399,
   "force_join": true,
   "force_join_channels": [
-    "-1004374850616"
+    "-1004374850616",
+    "-1003922567550"
   ],
   "force_join_links": {
-    "-1004374850616": "https://t.me/+WCGFhzf132QxNDg1"
+    "-1004374850616": "https://t.me/+WCGFhzf132QxNDg1",
+    "-1003922567550": "https://t.me/+oFBBDKjm6Fw4ZGE9"
   },
   "force_join_group_titles": {
-    "-1004374850616": "Likes\u3164 booster"
+    "-1004374850616": "Likes\u3164 booster",
+    "-1003922567550": "\u26a1 \ud835\udc6d\ud835\udc79\ud835\udc6c\ud835\udc6c \ud835\udc6d\ud835\udc70\ud835\udc79\ud835\udc6c \ud835\udc73\ud835\udc70\ud835\udc72\ud835\udc6c\ud835\udc7a \u26a1"
   },
   "force_join_group_usernames": {
-    "-1004374850616": "@GT_like_boost"
+    "-1004374850616": "@GT_like_boost",
+    "-1003922567550": "@FFLIKESPRO2"
   },
   "forward_channel_ids": [
     "@autolikespro",
