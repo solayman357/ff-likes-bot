@@ -503,6 +503,15 @@
       "after": 1233,
       "requested_by": 8800497037,
       "timestamp": "2026-11-07"
+    },
+    {
+      "target_uid": "19039395169",
+      "region": "TH",
+      "likes_given": 35,
+      "before": 4,
+      "after": 39,
+      "requested_by": 8868420169,
+      "timestamp": "2026-11-07"
     }
   ]
 }
