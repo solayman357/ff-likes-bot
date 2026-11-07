@@ -431,6 +431,15 @@
       "after": 4032,
       "requested_by": 8120926973,
       "timestamp": "2026-11-07"
+    },
+    {
+      "target_uid": "12345678",
+      "region": "BD",
+      "likes_given": 3,
+      "before": 4238899,
+      "after": 4238902,
+      "requested_by": 6653566625,
+      "timestamp": "2026-11-07"
     }
   ]
 }
