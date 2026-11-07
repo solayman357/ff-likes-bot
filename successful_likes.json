@@ -467,6 +467,15 @@
       "after": 8148,
       "requested_by": 7318111850,
       "timestamp": "2026-11-07"
+    },
+    {
+      "target_uid": "9379887497",
+      "region": "ME",
+      "likes_given": 16,
+      "before": 1488,
+      "after": 1504,
+      "requested_by": 7021683943,
+      "timestamp": "2026-11-07"
     }
   ]
 }
