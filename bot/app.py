@@ -3483,14 +3483,53 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     global force_join
+    chat = update.effective_chat
+    chat_type = chat.type if chat else None
+
+    # If no channel args given and we are inside a group/supergroup,
+    # add the current group to the force-join list.
     if len(context.args) < 1:
-        await reply(
-            update,
-            "❌ Usage:\n`/setforcejoin <channel_username_or_id> <invite_link>`\n\n"
-            "Example:\n`/setforcejoin @yourchannel https://t.me/+xxxxx`\n\n"
-            "Add more with `/addforcejoin <channel> <link>`."
-        )
-        return
+        if chat and chat_type in ("group", "supergroup"):
+            channel = str(chat.id)
+            chat_title = chat.title or f"Group {chat.id}"
+            link = force_join_links.get(str(chat.id), "")
+
+            index = _find_channel_index(channel)
+            if index >= 0:
+                old = force_join_channels[index]
+                force_join_channels[index] = channel
+                if old != channel:
+                    force_join_links.pop(str(old), None)
+                force_join_links[str(channel)] = link
+                action = "updated"
+            else:
+                force_join_channels.append(channel)
+                force_join_links[str(channel)] = link
+                action = "added"
+
+            force_join = True
+            save_all()
+
+            note = "" if link else "\n\n⚠️ No invite link set. Users will need to join manually."
+            await reply(
+                update,
+                f"✅ *Force Join {action.title()}*\n\n"
+                f"👥 Group: `{chat_title}`\n"
+                f"🆔 ID: `{channel}`\n"
+                f"🔗 Link: {link if link else 'Not provided'}\n"
+                f"🔢 Total required channels: `{len(force_join_channels)}`\n"
+                f"🟢 Force join: Enabled{note}"
+            )
+            return
+        else:
+            await reply(
+                update,
+                "❌ Usage:\n`/setforcejoin <channel_username_or_id> <invite_link>`\n\n"
+                "Example:\n`/setforcejoin @yourchannel https://t.me/+xxxxx`\n\n"
+                "In a group, send `/addforcejoin` with no args to add this group.\n"
+                "Add more with `/addforcejoin <channel> <link>`."
+            )
+            return
 
     channel = _normalize_channel(context.args[0])
     link = _normalize_channel(context.args[1]) if len(context.args) > 1 else ""
