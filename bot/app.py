@@ -799,14 +799,6 @@ def reschedule_auto_like_after_failure(task_id, retry_count):
     )
 
 
-def _mask_uid(uid: str) -> str:
-    """Mask a UID showing only first 2 and last 2 digits."""
-    uid_str = str(uid)
-    if len(uid_str) <= 4:
-        return uid_str
-    return uid_str[:2] + "X" * (len(uid_str) - 4) + uid_str[-2:]
-
-
 async def send_auto_like_report(region: str, uid, nickname: str,
                                  likes_before: int, likes_added: int,
                                  likes_after: int, target_likes: int,
@@ -828,12 +820,12 @@ async def send_auto_like_report(region: str, uid, nickname: str,
 
     status_emoji = "✅" if success else "❌"
     status_text = "SUCCESS" if success else "FAILED"
-    masked_uid = _mask_uid(uid)
+    full_uid = str(uid)
 
     msg = (
         f"{status_emoji} *AUTO LIKE REPORT — {status_text}*\n\n"
         f"👤 Player: {nickname}\n"
-        f"🏷️ UID: `{masked_uid}`\n"
+        f"🏷️ UID: `{full_uid}`\n"
         f"🌍 Server: {region}\n"
         f"📊 Likes Before: {likes_before:,}\n"
         f"❤️ Likes Added: {likes_added:,}\n"
@@ -1266,9 +1258,8 @@ user_uid_daily = {}  # {uid: date_str} - GLOBAL per-UID per-day lock (claimed by
 uid_daily_lock = threading.Lock()  # Atomic access to user_uid_daily
 daily_limit = 2
 like_tokens = 240
-force_join = False
-force_join_channels = []
-force_join_links = {}
+force_join_enabled = False
+force_join_groups = []  # List of dicts: [{"id": "-1001234567890", "title": "My Group", "username": "@groupname", "invite_link": "https://t.me/+xxxxx"}]
 welcome_msg = "👋 Welcome to FF LIKES PRO BOT! Use /help to see all commands."
 goodbye_msg = "👋 Goodbye! Come back soon to FF LIKES PRO BOT."
 
@@ -1441,22 +1432,23 @@ def save_all():
                 print(f"⚠️ GitHub queue failed for {key}: {e}", flush=True)
 
 FORCE_JOIN_TEXT = (
-    "🔒 *JOIN ALL REQUIRED CHANNELS*\n\n"
-    "To use FF LIKES PRO, please join every channel/group below.\n\n"
+    "🔒 *JOIN ALL REQUIRED GROUPS*\n\n"
+    "To use FF LIKES PRO, please join every group below.\n\n"
     "1️⃣ Tap each button and join\n"
     "2️⃣ Come back and tap ✅ I'VE JOINED - VERIFY"
 )
 
 
 def build_force_join_keyboard() -> InlineKeyboardMarkup:
-    """One URL button per configured channel, then the verify button."""
+    """One URL button per configured group, then the verify button."""
     keyboard = []
-    for channel in force_join_channels:
-        link = (force_join_links.get(str(channel)) or '').strip()
+    for i, group in enumerate(force_join_groups, start=1):
+        link = (group.get("invite_link") or "").strip()
+        title = group.get("title") or group["id"]
         if link:
-            keyboard.append([InlineKeyboardButton(f"📢 Join {channel}", url=link)])
+            keyboard.append([InlineKeyboardButton(f"📢 Join Group {i} — {title[:25]}", url=link)])
         else:
-            keyboard.append([InlineKeyboardButton(f"⚠️ {channel} (no link set)", callback_data="forcejoin_noop")])
+            keyboard.append([InlineKeyboardButton(f"⚠️ Group {i} (no link)", callback_data="forcejoin_noop")])
     keyboard.append([InlineKeyboardButton("✅ I'VE JOINED - VERIFY", callback_data="verify_join")])
     return InlineKeyboardMarkup(keyboard)
 
