@@ -1258,8 +1258,11 @@ user_uid_daily = {}  # {uid: date_str} - GLOBAL per-UID per-day lock (claimed by
 uid_daily_lock = threading.Lock()  # Atomic access to user_uid_daily
 daily_limit = 2
 like_tokens = 240
-force_join_enabled = False
-force_join_groups = []  # List of dicts: [{"id": "-1001234567890", "title": "My Group", "username": "@groupname", "invite_link": "https://t.me/+xxxxx"}]
+force_join = False
+force_join_channels = []  # List of group chat ID strings: ["-1001234567890", ...]
+force_join_links = {}  # Dict: group_id → invite_link
+force_join_group_titles = {}  # Dict: group_id → group title
+force_join_group_usernames = {}  # Dict: group_id → @username
 welcome_msg = "👋 Welcome to FF LIKES PRO BOT! Use /help to see all commands."
 goodbye_msg = "👋 Goodbye! Come back soon to FF LIKES PRO BOT."
 
@@ -1277,7 +1280,7 @@ def _read_json(path, default):
 
 def load_data():
     """Load persisted data. GitHub is the source of truth when enabled."""
-    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channels, force_join_links, forward_channel_ids, forward_channel_links, forward_channel_id, forward_channel_link, AUTO_LIKE_CHANNEL_ID, AUTO_LIKE_GROUP_ID, user_uid_daily
+    global allowed_groups, daily_stats, user_limits, bot_status, bot_mode, daily_limit, like_tokens, force_join, force_join_channels, force_join_links, force_join_group_titles, force_join_group_usernames, forward_channel_ids, forward_channel_links, forward_channel_id, forward_channel_link, AUTO_LIKE_CHANNEL_ID, AUTO_LIKE_GROUP_ID, user_uid_daily
 
     if github_persistence:
         try:
@@ -1328,6 +1331,8 @@ def load_data():
         force_join = bool(cfg.get('force_join', force_join))
         force_join_channels = list(cfg.get('force_join_channels', force_join_channels) or [])
         force_join_links = dict(cfg.get('force_join_links', force_join_links) or {})
+        force_join_group_titles = dict(cfg.get('force_join_group_titles', force_join_group_titles) or {})
+        force_join_group_usernames = dict(cfg.get('force_join_group_usernames', force_join_group_usernames) or {})
         forward_channel_ids = list(cfg.get('forward_channel_ids') or [])
         forward_channel_links = dict(cfg.get('forward_channel_links') or {})
 
@@ -1401,6 +1406,8 @@ def save_all():
                 'force_join': force_join,
                 'force_join_channels': force_join_channels,
                 'force_join_links': force_join_links,
+                'force_join_group_titles': force_join_group_titles,
+                'force_join_group_usernames': force_join_group_usernames,
                 'forward_channel_ids': forward_channel_ids,
                 'forward_channel_links': forward_channel_links,
                 # Backward compatibility: also save single value
@@ -1442,11 +1449,13 @@ FORCE_JOIN_TEXT = (
 def build_force_join_keyboard() -> InlineKeyboardMarkup:
     """One URL button per configured group, then the verify button."""
     keyboard = []
-    for i, group in enumerate(force_join_groups, start=1):
-        link = (group.get("invite_link") or "").strip()
-        title = group.get("title") or group["id"]
+    for i, gid in enumerate(force_join_channels, start=1):
+        link = (force_join_links.get(gid) or "").strip()
+        title = force_join_group_titles.get(gid) or gid
+        username = force_join_group_usernames.get(gid)
+        display = f"{title} ({username})" if username else title
         if link:
-            keyboard.append([InlineKeyboardButton(f"📢 Join Group {i} — {title[:25]}", url=link)])
+            keyboard.append([InlineKeyboardButton(f"📢 Join Group {i} — {display[:25]}", url=link)])
         else:
             keyboard.append([InlineKeyboardButton(f"⚠️ Group {i} (no link)", callback_data="forcejoin_noop")])
     keyboard.append([InlineKeyboardButton("✅ I'VE JOINED - VERIFY", callback_data="verify_join")])
@@ -1811,11 +1820,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += "🚀 `/setapimax` or `/maxff` — 400 tokens max\n"
         msg += "\n"
         msg += "🔗 *Force-Join:*\n"
-        msg += "   `/setforcejoin <ch> <link>` — Add channel\n"
-        msg += "   `/addforcejoin <ch> <link>` — Add more\n"
-        msg += "   `/removeforcejoin <ch>` / `all` — Remove\n"
+        msg += "   `/addforcejointhisgroup` — Add current group\n"
+        msg += "   `/removeforcejoin <id>` / `all` — Remove\n"
         msg += "   `/forcejoinlist` / `/forcejoinstatus` — View\n"
         msg += "   `/forcejoinon` / `/forcejoinoff` — Toggle\n"
+        msg += "   `/clearforcejoin confirm` — Clear all\n"
         msg += "\n"
         msg += "👥 *Group Management:*\n"
         msg += "   `/registergroup <id>` — Register group\n"
@@ -3525,13 +3534,17 @@ def _format_force_join_list() -> str:
     if not force_join_channels:
         return "  None configured"
     lines = []
-    for i, ch in enumerate(force_join_channels, start=1):
-        link = force_join_links.get(str(ch), "") or "No link set"
-        lines.append(f"  {i}. `{ch}`\n     🔗 {link}")
+    for i, gid in enumerate(force_join_channels, start=1):
+        link = force_join_links.get(gid, "") or "No link set"
+        title = force_join_group_titles.get(gid, gid)
+        username = force_join_group_usernames.get(gid, "")
+        display = f"{title} ({username})" if username else title
+        lines.append(f"  {i}. {display}\n     🆔 `{gid}`\n     🔗 {link}")
     return "\n".join(lines)
 
 
 async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add the current group to the force-join list. Admin only."""
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
@@ -3540,86 +3553,61 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     chat_type = chat.type if chat else None
 
-    # If no channel args given and we are inside a group/supergroup,
-    # add the current group to the force-join list.
-    if len(context.args) < 1:
-        if chat and chat_type in ("group", "supergroup"):
-            channel = str(chat.id)
-            chat_title = chat.title or f"Group {chat.id}"
-            link = force_join_links.get(str(chat.id), "")
-
-            index = _find_channel_index(channel)
-            if index >= 0:
-                old = force_join_channels[index]
-                force_join_channels[index] = channel
-                if old != channel:
-                    force_join_links.pop(str(old), None)
-                force_join_links[str(channel)] = link
-                action = "updated"
-            else:
-                force_join_channels.append(channel)
-                force_join_links[str(channel)] = link
-                action = "added"
-
-            force_join = True
-            save_all()
-
-            note = "" if link else "\n\n⚠️ No invite link set. Users will need to join manually."
-            await reply(
-                update,
-                f"✅ *Force Join {action.title()}*\n\n"
-                f"👥 Group: `{chat_title}`\n"
-                f"🆔 ID: `{channel}`\n"
-                f"🔗 Link: {link if link else 'Not provided'}\n"
-                f"🔢 Total required channels: `{len(force_join_channels)}`\n"
-                f"🟢 Force join: Enabled{note}"
-            )
-            return
-        else:
-            await reply(
-                update,
-                "❌ Usage:\n`/setforcejoin <channel_username_or_id> <invite_link>`\n\n"
-                "Example:\n`/setforcejoin @yourchannel https://t.me/+xxxxx`\n\n"
-                "In a group, send `/addforcejoin` with no args to add this group.\n"
-                "Add more with `/addforcejoin <channel> <link>`."
-            )
-            return
-
-    channel = _normalize_channel(context.args[0])
-    link = _normalize_channel(context.args[1]) if len(context.args) > 1 else ""
-
-    # Be forgiving if the admin passes link first.
-    if channel.lower().startswith(("http://", "https://", "tg://")) and link and not link.lower().startswith(("http://", "https://", "tg://")):
-        channel, link = link, channel
-
-    if not channel:
-        await reply(update, "❌ Invalid channel.")
+    # Only works inside a group/supergroup, no args needed
+    if not chat or chat_type not in ("group", "supergroup"):
+        await reply(
+            update,
+            "❌ This command must be used inside a group.\n\n"
+            "Send `/addforcejointhisgroup` from the group you want to require.\n"
+            "The bot must be an administrator in that group."
+        )
         return
 
-    index = _find_channel_index(channel)
-    if index >= 0:
-        old = force_join_channels[index]
-        force_join_channels[index] = channel
-        if old != channel:
-            force_join_links.pop(str(old), None)
-        force_join_links[str(channel)] = link
+    gid = str(chat.id)
+    chat_title = chat.title or f"Group {chat.id}"
+    username = getattr(chat, "username", None)
+    if username and not username.startswith("@"):
+        username = "@" + username
+
+    # Try to generate an invite link (bot must be admin with invite link permission)
+    invite_link = None
+    try:
+        try:
+            existing = await context.bot.get_chat(chat.id)
+            invite_link = getattr(existing, "invite_link", None) or None
+        except Exception:
+            pass
+        if not invite_link:
+            new_link = await context.bot.create_chat_invite_link(chat.id)
+            invite_link = new_link.invite_link
+    except Exception as e:
+        print(f"⚠️ Could not generate invite link for {gid}: {e}", flush=True)
+        invite_link = None
+
+    # Check for duplicate
+    if gid in force_join_channels:
+        # Update existing entry
+        force_join_links[gid] = invite_link or ""
+        force_join_group_titles[gid] = chat_title
+        force_join_group_usernames[gid] = username or ""
         action = "updated"
     else:
-        force_join_channels.append(channel)
-        force_join_links[str(channel)] = link
+        force_join_channels.append(gid)
+        force_join_links[gid] = invite_link or ""
+        force_join_group_titles[gid] = chat_title
+        force_join_group_usernames[gid] = username or ""
         action = "added"
 
     force_join = True
     save_all()
 
-    note = "" if link else "\n\n⚠️ No invite link set. Add one so users get a Join button."
+    note = "" if invite_link else "\n\n⚠️ No invite link available. Make the bot admin with invite link permission."
     await reply(
         update,
-        f"✅ *Force Join Channel {action.title()}*\n\n"
-        f"📢 Channel: `{channel}`\n"
-        f"🔗 Link: {link if link else 'Not provided'}\n"
-        f"🔢 Total required channels: `{len(force_join_channels)}`\n"
-        f"🟢 Force join: Enabled{note}"
+        f"✅ *FORCE JOIN GROUP {action.upper()}*\n\n"
+        f"👥 Group: {chat_title}\n"
+        f"🔢 Total Required Groups: `{len(force_join_channels)}`\n"
+        f"🟢 Status: Enabled{note}"
     )
 
 
@@ -3634,7 +3622,7 @@ async def addforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def removeforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Remove one required channel, or all of them."""
+    """Remove one required group, or all of them."""
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
@@ -3643,40 +3631,85 @@ async def removeforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 1:
         await reply(
             update,
-            "❌ Usage:\n`/removeforcejoin <channel_username_or_id>`\n"
+            "❌ Usage:\n`/removeforcejoin <group_id_or_title>`\n"
             "`/removeforcejoin all`\n\n"
-            "Example:\n`/removeforcejoin @yourchannel`"
+            "Example:\n`/removeforcejoin -1001234567890`\n"
+            "Use `/forcejoinlist` to see configured groups."
         )
         return
 
-    target = _normalize_channel(context.args[0])
+    target = context.args[0].strip()
 
     if target.lower() == "all":
         count = len(force_join_channels)
         force_join_channels.clear()
         force_join_links.clear()
+        force_join_group_titles.clear()
+        force_join_group_usernames.clear()
         force_join = False
         save_all()
-        await reply(update, f"✅ *All Force Join Channels Removed*\n\nRemoved: `{count}`\n🟢 Force join: Disabled")
+        await reply(update, f"✅ *All Force Join Groups Removed*\n\nRemoved: `{count}`\n🟢 Force join: Disabled")
         return
 
-    index = _find_channel_index(target)
+    # Try to match by ID first, then by title
+    index = -1
+    for i, gid in enumerate(force_join_channels):
+        if gid == target:
+            index = i
+            break
+        if force_join_group_titles.get(gid, "").lower() == target.lower():
+            index = i
+            break
+
     if index < 0:
-        await reply(update, f"❌ Channel `{target}` is not in the force-join list.\n\nUse `/forcejoinlist` to see configured channels.")
+        await reply(update, f"❌ Group `{target}` is not in the force-join list.\n\nUse `/forcejoinlist` to see configured groups.")
         return
 
-    removed = force_join_channels.pop(index)
-    force_join_links.pop(str(removed), None)
+    removed_id = force_join_channels.pop(index)
+    removed_title = force_join_group_titles.pop(removed_id, removed_id)
+    force_join_links.pop(removed_id, None)
+    force_join_group_usernames.pop(removed_id, None)
     if not force_join_channels:
         force_join = False
     save_all()
     await reply(
         update,
-        f"✅ *Force Join Channel Removed*\n\n"
-        f"📢 Channel: `{removed}`\n"
-        f"🔢 Remaining required channels: `{len(force_join_channels)}`\n"
+        f"✅ *Force Join Group Removed*\n\n"
+        f"👥 Group: {removed_title}\n"
+        f"🆔 ID: `{removed_id}`\n"
+        f"🔢 Remaining required groups: `{len(force_join_channels)}`\n"
         f"🟢 Force join: {'Enabled' if force_join else 'Disabled'}"
     )
+
+
+async def addforcejointhisgroup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add the current group to force-join list. Must be used inside the group."""
+    await _add_force_join(update, context)
+
+
+async def clearforcejoin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clear all force-join groups after admin confirmation."""
+    if not is_admin(update.effective_user.id):
+        await reply(update, "❌ Admin only")
+        return
+
+    global force_join
+    if context.args and context.args[0].lower() == "confirm":
+        count = len(force_join_channels)
+        force_join_channels.clear()
+        force_join_links.clear()
+        force_join_group_titles.clear()
+        force_join_group_usernames.clear()
+        force_join = False
+        save_all()
+        await reply(update, f"✅ *All Force Join Groups Cleared*\n\nRemoved: `{count}`\n🟢 Force join: Disabled")
+    else:
+        await reply(
+            update,
+            "⚠️ *Confirm Clear All Force Join Groups*\n\n"
+            "This will remove ALL required groups and disable force join.\n\n"
+            "Send `/clearforcejoin confirm` to proceed."
+        )
 
 
 async def forcejoinlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3685,7 +3718,7 @@ async def forcejoinlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await reply(
         update,
-        f"📋 *Force Join Channels*\n\n"
+        f"📋 *Force Join Groups*\n\n"
         f"🟢 Force join: {'Enabled' if force_join else 'Disabled'}\n"
         f"🔢 Total: `{len(force_join_channels)}`\n\n"
         f"{_format_force_join_list()}"
@@ -3693,7 +3726,7 @@ async def forcejoinlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def forcejoinstatus(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show the real saved configuration and verify each channel is reachable."""
+    """Show the real saved configuration and verify each group is reachable."""
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
@@ -3703,26 +3736,29 @@ async def forcejoinstatus(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update,
             "📊 *Force Join Status*\n\n"
             f"Status: {'✅ Enabled' if force_join else '❌ Disabled'}\n"
-            "Required channels: `0`\n\n"
-            "No channels configured. Add one with `/setforcejoin <channel> <link>`."
+            "Required groups: `0`\n\n"
+            "No groups configured. Add one with `/addforcejointhisgroup` from inside the group."
         )
         return
 
     lines = []
-    for ch in force_join_channels:
-        link = force_join_links.get(str(ch), "") or "No link set"
+    for gid in force_join_channels:
+        title = force_join_group_titles.get(gid, gid)
+        username = force_join_group_usernames.get(gid, "")
+        link = force_join_links.get(gid, "") or "No link set"
+        display = f"{title} ({username})" if username else title
         try:
-            chat = await context.bot.get_chat(ch)
-            title = getattr(chat, "title", None) or getattr(chat, "username", None) or "unknown"
-            lines.append(f"• `{ch}` — ✅ reachable\n   {title} (id: `{chat.id}`)\n   🔗 {link}")
+            chat = await context.bot.get_chat(gid)
+            status_text = "✅ reachable"
         except Exception as e:
-            lines.append(f"• `{ch}` — ⚠️ not reachable by bot\n   {type(e).__name__}: {str(e)[:80]}\n   🔗 {link}")
+            status_text = f"⚠️ not reachable ({type(e).__name__})"
+        lines.append(f"• {display}\n   {status_text}\n   🆔 `{gid}`\n   🔗 {link}")
 
     await reply(
         update,
         "📊 *Force Join Status*\n\n"
-        f"Status: {'✅ Enabled' if force_join else '❌ Disabled (channels saved but force join is OFF)'}\n"
-        f"Required channels: `{len(force_join_channels)}`\n\n"
+        f"Status: {'✅ Enabled' if force_join else '❌ Disabled (groups saved but force join is OFF)'}\n"
+        f"Required groups: `{len(force_join_channels)}`\n\n"
         + "\n".join(lines)
     )
 
@@ -3733,11 +3769,11 @@ async def forcejoinon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     global force_join
     if not force_join_channels:
-        await reply(update, "❌ No channels configured. Add one with `/setforcejoin <channel> <link>` first.")
+        await reply(update, "❌ No groups configured. Add one with `/addforcejointhisgroup` first.")
         return
     force_join = True
     save_all()
-    await reply(update, f"🟢 *Force Join Enabled*\n\nRequired channels: `{len(force_join_channels)}`")
+    await reply(update, f"🟢 *Force Join Enabled*\n\nRequired groups: `{len(force_join_channels)}`")
 
 
 async def forcejoinoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3747,7 +3783,7 @@ async def forcejoinoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global force_join
     force_join = False
     save_all()
-    await reply(update, "🔴 *Force Join Disabled*\n\nSaved channels are kept. Re-enable with `/forcejoinon`.")
+    await reply(update, "🔴 *Force Join Disabled*\n\nSaved groups are kept. Re-enable with `/forcejoinon`.")
 
 
 async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4307,12 +4343,6 @@ def main():
     except Exception as e:
         print(f"⚠️ Auto Like DB init failed: {e}", flush=True)
 
-    # Disable force join to allow all users to use bot
-    force_join = False
-    force_join_channels = []
-    force_join_links = {}
-    print("🔓 Force join disabled - all users can use the bot", flush=True)
-
     # Initialize backup directory and verify database integrity on startup
     try:
         init_backup_dir()
@@ -4373,6 +4403,8 @@ def main():
         app.add_handler(CommandHandler("forcejoinstatus", forcejoinstatus))
         app.add_handler(CommandHandler("forcejoinon", forcejoinon))
         app.add_handler(CommandHandler("forcejoinoff", forcejoinoff))
+        app.add_handler(CommandHandler("addforcejointhisgroup", addforcejointhisgroup_cmd))
+        app.add_handler(CommandHandler("clearforcejoin", clearforcejoin_cmd))
         app.add_handler(CommandHandler("broadcast", broadcast_cmd))
         app.add_handler(CommandHandler("registergroup", register_group_cmd))
         app.add_handler(CommandHandler("apistatus", apistatus_cmd))
@@ -4458,6 +4490,8 @@ def main():
                     app.add_handler(CommandHandler("forcejoinstatus", forcejoinstatus))
                     app.add_handler(CommandHandler("forcejoinon", forcejoinon))
                     app.add_handler(CommandHandler("forcejoinoff", forcejoinoff))
+                    app.add_handler(CommandHandler("addforcejointhisgroup", addforcejointhisgroup_cmd))
+                    app.add_handler(CommandHandler("clearforcejoin", clearforcejoin_cmd))
                     app.add_handler(CommandHandler("broadcast", broadcast_cmd))
                     app.add_handler(CommandHandler("registergroup", register_group_cmd))
                     app.add_handler(CommandHandler("apistatus", apistatus_cmd))
