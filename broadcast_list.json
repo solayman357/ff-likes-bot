@@ -1,5 +1,12 @@
 {
-  "chats": {},
+  "chats": {
+    "-1004374850616": {
+      "chat_id": -1004374850616,
+      "chat_type": "supergroup",
+      "title": "Likesㅤ booster",
+      "added_at": "2026-11-07"
+    }
+  },
   "users": {
     "8309168013": {
       "user_id": 8309168013,
