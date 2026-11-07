@@ -799,46 +799,74 @@ def reschedule_auto_like_after_failure(task_id, retry_count):
     )
 
 
-async def forward_auto_like_success(result, region, uid, actual_given,
-                                    before, after, delivered, target_likes):
-    """Post an auto-like success summary to every configured forward channel."""
-    bot = app_bot_instance
+def _mask_uid(uid: str) -> str:
+    """Mask a UID showing only first 2 and last 2 digits."""
+    uid_str = str(uid)
+    if len(uid_str) <= 4:
+        return uid_str
+    return uid_str[:2] + "X" * (len(uid_str) - 4) + uid_str[-2:]
+
+
+async def send_auto_like_report(region: str, uid, nickname: str,
+                                 likes_before: int, likes_added: int,
+                                 likes_after: int, target_likes: int,
+                                 total_sent: int, remaining_likes: int,
+                                 success: bool, error_msg: str = None,
+                                 bot_instance=None):
+    """Send a detailed auto-like report to BOTH @autolikespro group and @FFAUTOLIKESPRO1 channel.
+
+    This is called after EACH UID is processed in the auto-like scheduler.
+    Sends one report per UID immediately after processing.
+    """
+    bot = bot_instance or app_bot_instance
     if bot is None:
+        print("⚠️ Auto-like report: bot instance not available", flush=True)
         return
 
-    nickname = result.get('PlayerNickname') or 'Unknown'
-    actual_uid = result.get('UID', uid)
-    level = result.get('Level', 0) or 0
+    # BOTH destinations are mandatory
+    destinations = ["@autolikespro", "@FFAUTOLIKESPRO1"]
+
+    status_emoji = "✅" if success else "❌"
+    status_text = "SUCCESS" if success else "FAILED"
+    masked_uid = _mask_uid(uid)
 
     msg = (
-        "🔥 AUTO LIKE SUCCESS 🔥\n\n"
+        f"{status_emoji} *AUTO LIKE REPORT — {status_text}*\n\n"
         f"👤 Player: {nickname}\n"
-        f"🏷️ UID: {actual_uid}\n"
-        f"🌍 Region: {region}\n"
-        f"⭐ Level: {level}\n\n"
-        f"❤️ Likes given: +{actual_given}\n"
-        f"📊 Total: {before} → {after}\n\n"
-        f"🎯 Progress: {delivered:,}/{target_likes:,}\n"
-        f"🤖 Auto Like"
+        f"🏷️ UID: `{masked_uid}`\n"
+        f"🌍 Server: {region}\n"
+        f"📊 Likes Before: {likes_before:,}\n"
+        f"❤️ Likes Added: {likes_added:,}\n"
+        f"📈 Likes After: {likes_after:,}\n"
+        f"🎯 Target Likes: {target_likes:,}\n"
+        f"📤 Total Sent: {total_sent:,}\n"
+        f"📉 Remaining: {remaining_likes:,}\n"
+        f"🟢 Status: {status_text}"
     )
+    if error_msg:
+        msg += f"\n⚠️ Error: {error_msg[:200]}"
+    msg += "\n🤖 Auto Like Scheduler"
 
-    for fwd_channel_id in list(forward_channel_ids):
-        if not fwd_channel_id:
+    for dest in destinations:
+        if not dest:
             continue
         sent_ok = False
-        for attempt in range(2):
+        last_error = None
+        for attempt in range(3):
             try:
-                await bot.send_message(chat_id=fwd_channel_id, text=msg)
-                print(f"✅ Auto-like success forwarded to {fwd_channel_id}", flush=True)
+                await bot.send_message(chat_id=dest, text=msg, parse_mode='Markdown')
+                print(f"✅ Auto-like report sent to {dest} (attempt {attempt + 1})", flush=True)
                 sent_ok = True
                 break
             except Exception as e:
-                print(f"⚠️ Auto-like forward attempt {attempt + 1} failed "
-                      f"for {fwd_channel_id}: {e}", flush=True)
-                if attempt == 0:
-                    await asyncio.sleep(2)
+                last_error = e
+                print(f"⚠️ Auto-like report attempt {attempt + 1} failed "
+                      f"for {dest}: {e}", flush=True)
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)  # 1s, 2s backoff
         if not sent_ok:
-            print(f"❌ Auto-like forward failed for {fwd_channel_id} after retries", flush=True)
+            print(f"❌ Auto-like report FAILED for {dest} after 3 attempts: "
+                  f"{last_error}", flush=True)
 
 
 async def execute_auto_like_task(task):
@@ -864,6 +892,8 @@ async def execute_auto_like_task(task):
         # Call the existing like API
         result = await call_like_api(region, str(uid), tokens_to_request)
 
+        nickname = result.get('PlayerNickname') or 'Unknown' if result else 'Unknown'
+
         if result is None or result.get("error"):
             error_msg = result.get("error", "Unknown error") if result else "No response"
             add_auto_like_history(
@@ -871,6 +901,16 @@ async def execute_auto_like_task(task):
                 0, 0, 'failed', error_msg
             )
             print(f"⚠️ Auto like task {task_id} failed: {error_msg}", flush=True)
+
+            # Send failure report to both destinations
+            await send_auto_like_report(
+                region=region, uid=uid, nickname=nickname,
+                likes_before=0, likes_added=0, likes_after=0,
+                target_likes=target_likes, total_sent=0,
+                remaining_likes=remaining, success=False,
+                error_msg=error_msg
+            )
+
             reschedule_auto_like_after_failure(task_id, retry_count)
             return
 
@@ -912,12 +952,14 @@ async def execute_auto_like_task(task):
             print(f"✅ Auto like task {task_id}: +{actual_given} likes "
                   f"({new_delivered}/{target_likes})", flush=True)
 
-            # Post the success to the same channels used by manual /like
-            if actual_given > 0:
-                await forward_auto_like_success(
-                    result, region, uid, actual_given,
-                    before, after, new_delivered, target_likes
-                )
+            # Send detailed report to BOTH @autolikespro and @FFAUTOLIKESPRO1
+            await send_auto_like_report(
+                region=region, uid=uid, nickname=nickname,
+                likes_before=before, likes_added=actual_given,
+                likes_after=after, target_likes=target_likes,
+                total_sent=actual_given, remaining_likes=new_remaining,
+                success=True
+            )
 
             # Announce progress
             if AUTO_LIKE_BROADCAST_ENABLED:
@@ -937,6 +979,16 @@ async def execute_auto_like_task(task):
                 f"API status {status}: Likes not given"
             )
             print(f"⚠️ Auto like task {task_id}: API status {status}, no likes given", flush=True)
+
+            # Send failure report to both destinations
+            await send_auto_like_report(
+                region=region, uid=uid, nickname=nickname,
+                likes_before=before, likes_added=0, likes_after=after,
+                target_likes=target_likes, total_sent=0,
+                remaining_likes=remaining, success=False,
+                error_msg=f"API status {status}: Likes not given"
+            )
+
             reschedule_auto_like_after_failure(task_id, retry_count)
 
     except Exception as e:
@@ -945,6 +997,16 @@ async def execute_auto_like_task(task):
             task_id, owner_id, uid, region, 0,
             0, 0, 'failed', str(e)[:200]
         )
+
+        # Send exception report to both destinations
+        await send_auto_like_report(
+            region=region, uid=uid, nickname='Unknown',
+            likes_before=0, likes_added=0, likes_after=0,
+            target_likes=target_likes, total_sent=0,
+            remaining_likes=remaining, success=False,
+            error_msg=str(e)[:200]
+        )
+
         reschedule_auto_like_after_failure(task_id, retry_count)
 
 
