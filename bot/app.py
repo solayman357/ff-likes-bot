@@ -1820,7 +1820,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += "🚀 `/setapimax` or `/maxff` — 400 tokens max\n"
         msg += "\n"
         msg += "🔗 *Force-Join:*\n"
-        msg += "   `/addforcejointhisgroup` — Add current group\n"
+        msg += "   `/addforcejointhisgroup` — Add current group/channel\n"
+        msg += "   `/addforcejointhisgroup @username` — Add by username\n"
         msg += "   `/removeforcejoin <id>` / `all` — Remove\n"
         msg += "   `/forcejoinlist` / `/forcejoinstatus` — View\n"
         msg += "   `/forcejoinon` / `/forcejoinoff` — Toggle\n"
@@ -3544,7 +3545,13 @@ def _format_force_join_list() -> str:
 
 
 async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add the current group to the force-join list. Admin only."""
+    """Add a group or channel to the force-join list. Admin only.
+
+    Usage:
+      /addforcejointhisgroup              — inside a group/channel (auto-detects)
+      /addforcejointhisgroup @username    — add by channel/group username
+      /addforcejointhisgroup @username https://t.me/+invite  — add with custom link
+    """
     if not is_admin(update.effective_user.id):
         await reply(update, "❌ Admin only")
         return
@@ -3553,13 +3560,80 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     chat_type = chat.type if chat else None
 
-    # Only works inside a group/supergroup, no args needed
-    if not chat or chat_type not in ("group", "supergroup"):
+    # If args provided, treat first arg as channel/group identifier
+    if context.args:
+        raw = context.args[0].strip()
+        # Normalize username/channel ID
+        gid = raw
+        if not gid.startswith("@") and not gid.startswith("-") and not gid.startswith("+"):
+            gid = "@" + gid
+        # If it's a numeric chat ID, keep as-is
+        if gid.lstrip("-").isdigit():
+            gid = gid
+
+        # Custom invite link (optional second arg)
+        custom_link = None
+        if len(context.args) > 1:
+            custom_link = context.args[1].strip()
+
+        # Try to fetch chat info for title/username
+        chat_title = gid
+        chat_username = None
+        try:
+            chat_info = await context.bot.get_chat(gid)
+            chat_title = getattr(chat_info, "title", None) or gid
+            chat_username = getattr(chat_info, "username", None)
+            if chat_username and not chat_username.startswith("@"):
+                chat_username = "@" + chat_username
+        except Exception as e:
+            print(f"⚠️ Could not fetch chat info for {gid}: {e}", flush=True)
+
+        # Determine invite link
+        invite_link = custom_link
+        if not invite_link and chat_username:
+            invite_link = f"https://t.me/{chat_username.lstrip('@')}"
+        if not invite_link:
+            # Try to create invite link (only works if bot is admin in the chat)
+            try:
+                new_link = await context.bot.create_chat_invite_link(gid)
+                invite_link = new_link.invite_link
+            except Exception:
+                invite_link = None
+
+        # Check for duplicate
+        if gid in force_join_channels:
+            force_join_links[gid] = invite_link or ""
+            force_join_group_titles[gid] = chat_title
+            force_join_group_usernames[gid] = chat_username or ""
+            action = "updated"
+        else:
+            force_join_channels.append(gid)
+            force_join_links[gid] = invite_link or ""
+            force_join_group_titles[gid] = chat_title
+            force_join_group_usernames[gid] = chat_username or ""
+            action = "added"
+
+        force_join = True
+        save_all()
+
+        note = "" if invite_link else "\n\n⚠️ No invite link available."
         await reply(
             update,
-            "❌ This command must be used inside a group.\n\n"
-            "Send `/addforcejointhisgroup` from the group you want to require.\n"
-            "The bot must be an administrator in that group."
+            f"✅ *FORCE JOIN {action.upper()}*\n\n"
+            f"👥 Group/Channel: {chat_title}\n"
+            f"🆔 ID: `{gid}`\n"
+            f"🔢 Total Required: `{len(force_join_channels)}`\n"
+            f"🟢 Status: Enabled{note}"
+        )
+        return
+
+    # No args — auto-detect current chat (group, supergroup, or channel)
+    if not chat or chat_type not in ("group", "supergroup", "channel"):
+        await reply(
+            update,
+            "❌ This command must be used inside a group/channel, "
+            "or provide a username: `/addforcejointhisgroup @username`\n\n"
+            "The bot must be an administrator in that group/channel."
         )
         return
 
@@ -3586,7 +3660,6 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Check for duplicate
     if gid in force_join_channels:
-        # Update existing entry
         force_join_links[gid] = invite_link or ""
         force_join_group_titles[gid] = chat_title
         force_join_group_usernames[gid] = username or ""
@@ -3604,9 +3677,9 @@ async def _add_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     note = "" if invite_link else "\n\n⚠️ No invite link available. Make the bot admin with invite link permission."
     await reply(
         update,
-        f"✅ *FORCE JOIN GROUP {action.upper()}*\n\n"
-        f"👥 Group: {chat_title}\n"
-        f"🔢 Total Required Groups: `{len(force_join_channels)}`\n"
+        f"✅ *FORCE JOIN {action.upper()}*\n\n"
+        f"👥 Group/Channel: {chat_title}\n"
+        f"🔢 Total Required: `{len(force_join_channels)}`\n"
         f"🟢 Status: Enabled{note}"
     )
 
@@ -3683,7 +3756,7 @@ async def removeforcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def addforcejointhisgroup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add the current group to force-join list. Must be used inside the group."""
+    """Add current group/channel or by username to force-join list."""
     await _add_force_join(update, context)
 
 
