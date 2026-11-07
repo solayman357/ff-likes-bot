@@ -9,15 +9,16 @@
     "@autolikespro",
     "@FFAUTOLIKESPRO1",
     "-1004374850616",
-    "@group-4"
+    "@https://t.me/GT_like_boost"
   ],
   "force_join_links": {
     "@FFLIKESPRO2": "https://t.me/FFLIKESPRO2",
     "@autolikespro": "https://t.me/autolikespro",
     "@FFAUTOLIKESPRO1": "https://t.me/FFAUTOLIKESPRO1",
-    "-1004374850616": "",
-    "@group-4": "@https://t.me/GT_like_boost"
+    "@https://t.me/GT_like_boost": "@https://t.me/GT_like_boost"
   },
+  "force_join_group_titles": {},
+  "force_join_group_usernames": {},
   "forward_channel_ids": [
     "@autolikespro",
     "@FFAUTOLIKESPRO1"
